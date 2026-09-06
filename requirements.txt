@@ -1,0 +1,7 @@
+ladybug==0.20.2
+networkx==3.6.1
+numpy==2.5.3
+pandas==3.0.5
+psutil==7.2.2
+python-dateutil==2.9.0.post0
+six==1.17.0
