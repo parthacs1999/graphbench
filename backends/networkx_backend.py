@@ -25,6 +25,9 @@ class NetworkXBackend(GraphBackend):
     def neighbors(self, node_id: int) -> list[int]:
         return sorted(self.graph.successors(node_id))
 
+    def neighbors_batch(self, node_ids: list[int]) -> dict[int, list[int]]:
+        return {node_id: sorted(self.graph.successors(node_id)) for node_id in node_ids}
+
     def has_path(self, source: int, target: int) -> bool:
         return nx.has_path(self.graph, source, target)
 

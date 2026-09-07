@@ -28,7 +28,6 @@ def measure_operation(
     if warmup_runs < 0:
         raise ValueError("warmup_runs cannot be negative")
 
-    # Warm-up executions are not included in the measurements.
     for _ in range(warmup_runs):
         operation()
 
@@ -57,9 +56,7 @@ def measure_operation(
         "p95_ms": percentile(durations_ms, 0.95),
         "p99_ms": percentile(durations_ms, 0.99),
         "throughput_per_second": (
-            1000 / average_duration
-            if average_duration > 0
-            else float("inf")
+            1000 / average_duration if average_duration > 0 else float("inf")
         ),
         "durations_ms": durations_ms,
     }

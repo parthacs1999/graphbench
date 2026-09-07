@@ -31,6 +31,13 @@ class GraphBackend(ABC):
         pass
 
     @abstractmethod
+    def neighbors_batch(
+        self,
+        node_ids: list[int],
+    ) -> dict[int, list[int]]:
+        pass
+
+    @abstractmethod
     def has_path(self, source: int, target: int) -> bool:
         pass
 

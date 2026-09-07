@@ -113,6 +113,32 @@ class LadybugBackend(GraphBackend):
 
         return [int(row[0]) for row in result]
 
+    def neighbors_batch(self, node_ids: list[int]) -> dict[int, list[int]]:
+        results = {node_id: [] for node_id in node_ids}
+
+        if not node_ids:
+            return results
+
+        query_result = self.connection.execute(
+            """
+            MATCH (source:Node)-[:Connects]->(target:Node)
+            WHERE source.id IN $node_ids
+            RETURN source.id, target.id
+            ORDER BY source.id, target.id
+            """,
+            {
+                "node_ids": node_ids,
+            },
+        )
+
+        for row in query_result:
+            source_id = int(row[0])
+            target_id = int(row[1])
+
+            results[source_id].append(target_id)
+
+        return results
+
     def has_path(self, source: int, target: int) -> bool:
         if source == target:
             return True
