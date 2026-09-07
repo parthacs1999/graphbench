@@ -1,0 +1,9 @@
+sender,receiver
+Alice,Bob
+Alice,Charlie
+Bob,David
+Charlie,David
+David,Alice
+Alice,Bob
+Bob,Bob
+Charlie,

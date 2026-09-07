@@ -1,0 +1,37 @@
+{
+  "created_at": "2026-09-07T02:09:47.533997+00:00",
+  "input": {
+    "file": "/Users/parthachakraborty/Developer/NEW/Projects/graphbench/data/sample_edges.csv",
+    "source_column": "sender",
+    "target_column": "receiver"
+  },
+  "graph_health": {
+    "original_rows": 8,
+    "valid_unique_edges": 6,
+    "unique_nodes": 4,
+    "missing_rows": 1,
+    "duplicate_edges": 1,
+    "self_loops": 1
+  },
+  "correctness": {
+    "neighbor_results_match": true
+  },
+  "networkx": {
+    "build_median_ms": 0.0041249950299970806,
+    "build_p95_ms": 0.008417002391070127,
+    "neighbor_batch_median_ms": 0.0008749993867240846,
+    "neighbor_batch_p95_ms": 0.0009580035111866891
+  },
+  "ladybug": {
+    "build_median_ms": 3.6594580014934763,
+    "build_p95_ms": 4.550833997200243,
+    "neighbor_batch_median_ms": 0.6530419959744904,
+    "neighbor_batch_p95_ms": 0.8178749994840473
+  },
+  "comparison": {
+    "build_winner": "NetworkX",
+    "build_speedup": 887.1424025681956,
+    "query_winner": "NetworkX",
+    "query_speedup": 746.3342327809145
+  }
+}
