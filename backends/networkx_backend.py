@@ -31,5 +31,22 @@ class NetworkXBackend(GraphBackend):
     def has_path(self, source: int, target: int) -> bool:
         return nx.has_path(self.graph, source, target)
 
+    def shortest_path(
+        self,
+        source: int,
+        target: int,
+    ) -> list[int] | None:
+        try:
+            path = nx.shortest_path(
+                self.graph,
+                source=source,
+                target=target,
+            )
+
+            return list(path)
+
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return None
+
     def close(self) -> None:
         self.graph.clear()

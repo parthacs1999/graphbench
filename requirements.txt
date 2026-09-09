@@ -11,7 +11,6 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
-ladybug==0.20.2
 MarkupSafe==3.0.3
 narwhals==2.25.0
 networkx==3.6.1
@@ -36,3 +35,5 @@ typing_extensions==4.16.0
 urllib3==2.7.0
 uvicorn==0.52.4
 websockets==16.1.1
+scipy
+ladybug==0.20.3

@@ -41,6 +41,20 @@ class GraphBackend(ABC):
     def has_path(self, source: int, target: int) -> bool:
         pass
 
+    # @abstractmethod
+    # def shortest_path(
+    #     self,
+    #     source: int,
+    #     target: int,
+    # ) -> list[int] | None:
+    #     """
+    #     Return one shortest directed path from source to target.
+
+    #     The returned list includes source and target.
+    #     Return None when no path exists.
+    #     """
+    #     raise NotImplementedError
+
     @abstractmethod
     def close(self) -> None:
         pass

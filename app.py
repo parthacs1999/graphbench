@@ -10,6 +10,7 @@ import streamlit as st
 from backends.ladybug_backend import LadybugBackend
 from backends.networkx_backend import NetworkXBackend
 from benchmarks.isolated_resources import compare_graph_resources
+from benchmarks.reproducibility import collect_environment_metadata
 from benchmarks.runner import benchmark_backend
 from ingestion.csv_loader import load_edge_csv
 
@@ -671,7 +672,9 @@ if run_performance:
             "name": dataset_name,
             "source_column": source_column,
             "target_column": target_column,
+            "sha256": dataset_hash,
         }
+        report["environment"] = collect_environment_metadata()
         st.session_state["benchmark_report"] = report
         status_container.success("Performance benchmark completed.")
         progress_bar.empty()
@@ -697,7 +700,9 @@ if run_resources:
             "name": dataset_name,
             "source_column": source_column,
             "target_column": target_column,
+            "sha256": dataset_hash,
         }
+        resource_report["environment"] = collect_environment_metadata()
         st.session_state["resource_report"] = resource_report
         status_container.success("Isolated resource profile completed.")
         progress_bar.empty()
@@ -906,6 +911,41 @@ with workspace_tabs[5]:
 """,
                     unsafe_allow_html=True,
                 )
+
+    available_report = report or resource_report
+
+    st.divider()
+    st.subheader("Reproducibility")
+
+    if available_report is None:
+        st.info(
+            "Run a performance benchmark or resource profile to "
+            "record the execution environment."
+        )
+    elif "environment" not in available_report:
+        st.info(
+            "This result was created before environment recording was added. "
+            "Run it again to create a reproducible report."
+        )
+    else:
+        environment = available_report["environment"]
+        packages = environment["packages"]
+        system = environment["system"]
+        python = environment["python"]
+
+        environment_columns = st.columns(4)
+        environment_columns[0].metric("Python", python["version"])
+        environment_columns[1].metric("NetworkX", packages["networkx"])
+        environment_columns[2].metric("LadybugDB", packages["ladybug"])
+        environment_columns[3].metric("Machine", system["machine"])
+
+        st.caption(
+            f"Recorded at {environment['timestamp_utc']} · "
+            f"Dataset SHA-256: {available_report['dataset']['sha256'][:16]}..."
+        )
+
+        with st.expander("Complete execution environment"):
+            st.json(environment)
 
 
 combined_report = {
