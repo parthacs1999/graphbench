@@ -725,6 +725,181 @@ def render_correctness_details(report: dict) -> None:
     )
 
 
+def answer_graphbench_question(
+    question: str,
+    report: dict | None,
+    resource_report: dict | None,
+    normalized_graph,
+) -> str:
+    """Answer common product and benchmark questions without an external API."""
+    normalized_question = question.lower().strip()
+
+    if not normalized_question:
+        return "Ask me about the graph, correctness, winners, latency, throughput, memory, or methodology."
+
+    if any(word in normalized_question for word in ["hello", "hi", "hey"]):
+        return (
+            "Hello! I am the GraphBench Instant Guide. I explain this graph and its "
+            "benchmark results using only measured project data."
+        )
+
+    if any(
+        word in normalized_question for word in ["dataset", "graph", "nodes", "edges"]
+    ):
+        return (
+            f"The selected graph contains **{normalized_graph.number_of_nodes:,} nodes** "
+            f"and **{normalized_graph.valid_rows:,} valid directed connections**. "
+            f"GraphBench removed **{normalized_graph.missing_rows:,} incomplete rows** "
+            f"and **{normalized_graph.duplicate_edges:,} duplicate connections**."
+        )
+
+    if any(
+        word in normalized_question
+        for word in ["correct", "trust", "reliable", "valid"]
+    ):
+        if report is None:
+            return (
+                "No live performance result exists yet. Run the speed and correctness "
+                "test first. GraphBench will compare node counts, edge counts, and "
+                "neighbor answers before showing winner claims."
+            )
+
+        correctness = report["correctness"]
+        if correctness["passed"]:
+            return (
+                "**Correctness passed.** Both engines agreed on node counts, edge "
+                "counts, and neighbor results. The timing comparison is valid for this "
+                "specific graph, workload, configuration, and machine."
+            )
+
+        failed_checks = []
+        if not correctness["node_counts_match"]:
+            failed_checks.append("node counts")
+        if not correctness["edge_counts_match"]:
+            failed_checks.append("edge counts")
+        if not correctness["neighbor_results_match"]:
+            failed_checks.append("neighbor answers")
+
+        return (
+            "**Do not use this result to choose a winner.** The following checks "
+            f"failed: **{', '.join(failed_checks)}**. GraphBench intentionally hides "
+            "performance recommendations until correctness passes."
+        )
+
+    if "p95" in normalized_question or "percentile" in normalized_question:
+        return (
+            "**P95 is a slower-tail measurement.** If P95 is 10 ms, approximately "
+            "95% of measured runs completed in 10 ms or less. Comparing the median "
+            "with P95 helps reveal whether performance is stable or occasionally slow."
+        )
+
+    if "latency" in normalized_question or "time taken" in normalized_question:
+        return (
+            "**Latency is the time needed to complete one operation. Lower is better.** "
+            "GraphBench reports graph-build latency and the latency of one complete "
+            "neighbor-query batch in milliseconds."
+        )
+
+    if (
+        "throughput" in normalized_question
+        or "batches per second" in normalized_question
+    ):
+        return (
+            "**Throughput estimates how many complete query batches could finish per "
+            "second. Higher is better.** GraphBench derives it from average latency; "
+            "it is not a simultaneous multi-user load test."
+        )
+
+    if any(word in normalized_question for word in ["memory", "cpu", "resource"]):
+        if resource_report is None:
+            return (
+                "No resource report exists yet. Select **Measure memory and CPU** to "
+                "run each engine in a separate process and compare them more cleanly."
+            )
+
+        networkx_resource = resource_report["networkx"]
+        ladybug_resource = resource_report["ladybug"]
+        return (
+            "In the isolated resource test, NetworkX added approximately "
+            f"**{networkx_resource['additional_peak_memory_mb']:.2f} MB**, while "
+            "LadybugDB added approximately "
+            f"**{ladybug_resource['additional_peak_memory_mb']:.2f} MB**. CPU can "
+            "exceed 100% when native code uses multiple processor cores."
+        )
+
+    if any(
+        word in normalized_question for word in ["ingestion", "loading", "load graph"]
+    ):
+        return (
+            "The saved scalability study found a workload crossover. NetworkX won the "
+            "small 1K-node setup, while LadybugDB won optimized ingestion at 10K and "
+            "100K nodes when using sorted PyArrow tables, bulk COPY, and ANALYZE."
+        )
+
+    if any(
+        word in normalized_question
+        for word in ["random", "contiguous", "range", "strategy"]
+    ):
+        return (
+            "**Random nodes** represent general lookups and use a parameterized `IN` "
+            "batch in LadybugDB. **Contiguous nodes** form one numeric interval, so "
+            "LadybugDB can use the faster tested range predicate. Range results should "
+            "not be presented as representative of arbitrary node selection."
+        )
+
+    if any(
+        word in normalized_question
+        for word in ["why", "slow", "faster", "winner", "won"]
+    ):
+        if report is None:
+            return (
+                "Run the speed and correctness test first. Once both engines return "
+                "equivalent answers, I can explain which engine won graph setup and "
+                "neighbor lookup."
+            )
+
+        if not report["correctness"]["passed"]:
+            return (
+                "I cannot name a winner because correctness validation failed. Speed "
+                "does not matter when two engines return different answers."
+            )
+
+        build = report["build_comparison"]
+        query = report["query_comparison"]
+        return (
+            f"For this test, **{build['winner']} built the graph "
+            f"{build['speedup']:.2f}× faster**, and **{query['winner']} completed the "
+            f"neighbor workload {query['speedup']:.2f}× faster**. NetworkX benefits "
+            "from direct in-memory adjacency access. LadybugDB provides database "
+            "features and demonstrated stronger optimized bulk ingestion at larger "
+            "scales, but its arbitrary batch lookup plan performed scans and a hash join."
+        )
+
+    if any(
+        word in normalized_question for word in ["choose", "recommend", "use", "better"]
+    ):
+        if report is not None and not report["correctness"]["passed"]:
+            return (
+                "I cannot recommend an engine from this run because correctness failed. "
+                "Fix the mismatch and rerun the benchmark first."
+            )
+
+        return (
+            "Choose **NetworkX** for lightweight Python analysis and very fast direct "
+            "adjacency operations. Consider **LadybugDB** when you need persistent "
+            "graph storage, Cypher, database features, or scalable bulk ingestion. "
+            "Use the live result as evidence for your exact workload rather than "
+            "assuming one engine always wins."
+        )
+
+    return (
+        "I currently answer questions about **the selected graph, correctness, winners, "
+        "latency, P95, throughput, memory, ingestion, query strategies, and engine "
+        "selection**. This built-in guide intentionally stays within verified "
+        "GraphBench information."
+    )
+
+
 # -----------------------------------------------------------------------------
 # Sidebar configuration
 # -----------------------------------------------------------------------------
@@ -920,10 +1095,16 @@ benchmark_key = (*dataset_key, json.dumps(configuration, sort_keys=True))
 if st.session_state.get("active_dataset_key") != dataset_key:
     st.session_state.pop("benchmark_report", None)
     st.session_state.pop("resource_report", None)
+    st.session_state.pop("guide_messages", None)
+    st.session_state.pop("quick_guide_answer", None)
+    st.session_state.pop("quick_guide_last_question", None)
     st.session_state["active_dataset_key"] = dataset_key
 
 if st.session_state.get("active_benchmark_key") != benchmark_key:
     st.session_state.pop("benchmark_report", None)
+    st.session_state.pop("guide_messages", None)
+    st.session_state.pop("quick_guide_answer", None)
+    st.session_state.pop("quick_guide_last_question", None)
     st.session_state["active_benchmark_key"] = benchmark_key
 
 
@@ -974,7 +1155,7 @@ health_columns[2].metric("Rows removed", f"{normalized_graph.missing_rows:,}")
 health_columns[3].metric("Duplicates removed", f"{normalized_graph.duplicate_edges:,}")
 health_columns[4].metric("Self-connections", f"{normalized_graph.self_loops:,}")
 
-action_one, action_two = st.columns([1.3, 1])
+action_one, action_two, action_three = st.columns([1.25, 1, 0.72])
 run_performance = action_one.button(
     "Run speed and correctness test",
     type="primary",
@@ -985,6 +1166,108 @@ run_resources = action_two.button(
     width="stretch",
     help="Runs each engine separately for a cleaner resource comparison.",
 )
+
+assistant_button_label = (
+    "Close assistant"
+    if st.session_state.get("show_quick_guide", False)
+    else "Ask GraphBench"
+)
+toggle_quick_guide = action_three.button(
+    assistant_button_label,
+    key="toggle_quick_guide",
+    width="stretch",
+    help="Open a plain-language guide beside the benchmark controls.",
+)
+
+if toggle_quick_guide:
+    st.session_state["show_quick_guide"] = not st.session_state.get(
+        "show_quick_guide",
+        False,
+    )
+
+if st.session_state.get("show_quick_guide", False):
+    with st.container(border=True):
+        guide_heading, guide_note = st.columns([1, 1.4])
+        guide_heading.markdown("#### Ask GraphBench")
+        guide_note.caption(
+            "Instant explanations · No API key · Grounded in the current GraphBench data"
+        )
+
+        with st.form(
+            "quick_guide_form",
+            clear_on_submit=False,
+        ):
+            question_column, custom_column = st.columns(2)
+            quick_suggestion = question_column.selectbox(
+                "Common question",
+                [
+                    "Choose a question",
+                    "Which engine won and why?",
+                    "Can I trust this result?",
+                    "What does P95 mean?",
+                    "Which engine should I use?",
+                    "Why is LadybugDB slower for neighbor lookup?",
+                ],
+                key="quick_guide_suggestion",
+            )
+            custom_question = custom_column.text_input(
+                "Or type your own question",
+                key="quick_guide_question",
+                placeholder="Example: What does throughput mean?",
+            )
+
+            suggestion_button, custom_button = st.columns(2)
+            explain_suggestion = suggestion_button.form_submit_button(
+                "Explain selected question",
+                type="primary",
+                width="stretch",
+            )
+            ask_custom_question = custom_button.form_submit_button(
+                "Ask my question",
+                width="stretch",
+            )
+
+        if explain_suggestion or ask_custom_question:
+            if explain_suggestion:
+                quick_prompt = (
+                    quick_suggestion if quick_suggestion != "Choose a question" else ""
+                )
+            else:
+                quick_prompt = custom_question.strip()
+
+            if not quick_prompt:
+                if explain_suggestion:
+                    st.warning("Choose a common question first.")
+                else:
+                    st.warning("Type a question before selecting Ask my question.")
+            else:
+                quick_answer = answer_graphbench_question(
+                    question=quick_prompt,
+                    report=st.session_state.get("benchmark_report"),
+                    resource_report=st.session_state.get("resource_report"),
+                    normalized_graph=normalized_graph,
+                )
+                st.session_state["quick_guide_answer"] = quick_answer
+                st.session_state["quick_guide_last_question"] = quick_prompt
+
+                if "guide_messages" not in st.session_state:
+                    st.session_state["guide_messages"] = []
+                st.session_state["guide_messages"].append(
+                    {"role": "user", "content": quick_prompt}
+                )
+                st.session_state["guide_messages"].append(
+                    {"role": "assistant", "content": quick_answer}
+                )
+
+        if st.session_state.get("quick_guide_answer"):
+            st.divider()
+            with st.chat_message("user"):
+                st.markdown(
+                    st.session_state.get("quick_guide_last_question", "Question")
+                )
+            with st.chat_message("assistant"):
+                st.markdown(st.session_state["quick_guide_answer"])
+            st.caption("Continue the conversation in the Ask GraphBench tab.")
 
 status_container = st.empty()
 progress_container = st.empty()
@@ -1049,6 +1332,7 @@ resource_report = st.session_state.get("resource_report")
 workspace_tabs = st.tabs(
     [
         "Overview",
+        "Ask GraphBench",
         "Performance",
         "Scaling research",
         "Resources",
@@ -1124,6 +1408,72 @@ with workspace_tabs[0]:
 
 
 with workspace_tabs[1]:
+    st.subheader("Ask GraphBench")
+    st.markdown(
+        '<p class="section-intro">Get plain-language answers grounded in the selected graph, live benchmark, and verified project findings.</p>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "Instant Guide · No API key · No external AI service · Answers stay within GraphBench evidence"
+    )
+
+    if "guide_messages" not in st.session_state:
+        st.session_state["guide_messages"] = [
+            {
+                "role": "assistant",
+                "content": (
+                    "Welcome! I can explain which engine won, whether the result is "
+                    "trustworthy, what the metrics mean, and which engine may fit your use case."
+                ),
+            }
+        ]
+
+    st.markdown("#### Suggested questions")
+    suggestion_columns = st.columns(4)
+    suggestions = [
+        "Which engine won and why?",
+        "Can I trust this result?",
+        "What does P95 mean?",
+        "Which engine should I use?",
+    ]
+    selected_prompt = None
+
+    for index, suggestion in enumerate(suggestions):
+        if suggestion_columns[index].button(
+            suggestion,
+            key=f"guide_suggestion_{index}",
+            width="stretch",
+        ):
+            selected_prompt = suggestion
+
+    st.divider()
+
+    for message in st.session_state["guide_messages"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    typed_prompt = st.chat_input(
+        "Ask about this graph or its benchmark results...",
+        key="graphbench_guide_input",
+    )
+    prompt = selected_prompt or typed_prompt
+
+    if prompt:
+        answer = answer_graphbench_question(
+            question=prompt,
+            report=report,
+            resource_report=resource_report,
+            normalized_graph=normalized_graph,
+        )
+        st.session_state["guide_messages"].append({"role": "user", "content": prompt})
+        st.session_state["guide_messages"].append(
+            {"role": "assistant", "content": answer}
+        )
+        st.rerun()
+
+
+with workspace_tabs[2]:
     st.subheader("Performance details")
     st.markdown(
         '<p class="section-intro">Latency means time taken; lower is better. Throughput means completed batches per second; higher is better.</p>',
@@ -1185,7 +1535,7 @@ with workspace_tabs[1]:
             )
 
 
-with workspace_tabs[2]:
+with workspace_tabs[3]:
     st.subheader("Saved scaling research")
     st.markdown(
         '<p class="section-intro">These are precomputed development-machine experiments, not results from the graph currently selected in the sidebar.</p>',
@@ -1271,7 +1621,7 @@ with workspace_tabs[2]:
                 )
 
 
-with workspace_tabs[3]:
+with workspace_tabs[4]:
     st.subheader("Memory and CPU")
     st.markdown(
         '<p class="section-intro">Each engine runs in a separate process so one engine does not inherit the other engine\'s memory.</p>',
@@ -1319,7 +1669,7 @@ with workspace_tabs[3]:
             )
 
 
-with workspace_tabs[4]:
+with workspace_tabs[5]:
     preview_column, explanation_column = st.columns([1.45, 1])
 
     with preview_column:
@@ -1341,7 +1691,7 @@ with workspace_tabs[4]:
         )
 
 
-with workspace_tabs[5]:
+with workspace_tabs[6]:
     about_tab, methodology_tab, roadmap_tab = st.tabs(
         ["Product", "Methodology", "Roadmap"]
     )
