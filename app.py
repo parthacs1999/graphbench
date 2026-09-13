@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import random
 from pathlib import Path
 
 import altair as alt
@@ -27,19 +28,34 @@ SAMPLE_DATASETS = {
         "path": Path("data/sample_social_network.csv"),
         "source": "follower",
         "target": "followed",
-        "description": "Users connected by directed follow relationships.",
+        "description": "People connected by directed follow relationships.",
     },
     "Web links": {
         "path": Path("data/sample_web_links.csv"),
         "source": "source_page",
         "target": "target_page",
-        "description": "A directed graph of links between web pages.",
+        "description": "Web pages connected by directed hyperlinks.",
     },
     "Package dependencies": {
         "path": Path("data/sample_dependencies.csv"),
         "source": "package",
         "target": "depends_on",
-        "description": "Packages connected to their dependencies.",
+        "description": "Software packages connected to their dependencies.",
+    },
+}
+
+GENERATED_PRESETS = {
+    "Medium — 10K nodes / 50K edges": {
+        "nodes": 10_000,
+        "edges": 50_000,
+        "seed": 42,
+        "description": "A reproducible medium-sized directed graph.",
+    },
+    "Large — 100K nodes / 500K edges": {
+        "nodes": 100_000,
+        "edges": 500_000,
+        "seed": 42,
+        "description": "A larger reproducible graph for scalability testing.",
     },
 }
 
@@ -48,80 +64,122 @@ ENGINE_COLORS = {
     "LadybugDB": "#F59E0B",
 }
 
+INGESTION_RESULTS_FILE = Path("results/ingestion_scalability.csv")
+QUERY_RESULTS_FILE = Path("results/query_scalability.csv")
+QUERY_STRATEGY_RESULTS_FILE = Path("results/query_strategy_comparison.csv")
+
 
 st.markdown(
     """
 <style>
     .block-container {
-        max-width: 1450px;
-        padding-top: 1.25rem;
-        padding-bottom: 2rem;
+        max-width: 1440px;
+        padding-top: 1.15rem;
+        padding-bottom: 2.5rem;
     }
 
     .stApp {
         background:
-            radial-gradient(circle at 8% 0%, rgba(37, 99, 235, .10), transparent 28rem),
-            radial-gradient(circle at 96% 5%, rgba(245, 158, 11, .08), transparent 25rem);
+            radial-gradient(circle at 6% 0%, rgba(59, 130, 246, .11), transparent 30rem),
+            radial-gradient(circle at 95% 2%, rgba(245, 158, 11, .08), transparent 28rem),
+            #0B0F17;
     }
 
     section[data-testid="stSidebar"] {
-        border-right: 1px solid rgba(148, 163, 184, .18);
+        background: rgba(10, 15, 24, .96);
+        border-right: 1px solid rgba(148, 163, 184, .16);
     }
 
-    .product-header {
+    .hero {
         display: flex;
-        align-items: center;
         justify-content: space-between;
+        align-items: center;
         gap: 2rem;
-        border: 1px solid rgba(148, 163, 184, .20);
-        border-radius: 16px;
-        padding: 1.1rem 1.35rem;
+        padding: 1.35rem 1.5rem;
         margin-bottom: .85rem;
-        background: rgba(15, 23, 42, .30);
+        border: 1px solid rgba(148, 163, 184, .18);
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(15, 23, 42, .92), rgba(17, 24, 39, .72));
+        box-shadow: 0 18px 50px rgba(0, 0, 0, .16);
     }
 
-    .product-kicker {
+    .hero-kicker {
         color: #60A5FA;
-        font-size: .74rem;
-        font-weight: 750;
-        margin-top: 12px;
-        letter-spacing: .14em;
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .15em;
         text-transform: uppercase;
-        margin-bottom: .25rem;
+        margin-bottom: .35rem;
     }
 
-    .product-title {
-        font-size: 2rem;
-        font-weight: 780;
-        letter-spacing: -.04em;
+    .hero-title {
+        font-size: 2.35rem;
+        font-weight: 800;
+        letter-spacing: -.045em;
         line-height: 1;
         margin: 0;
     }
 
-    .product-description {
+    .hero-description {
         color: #CBD5E1;
-        font-size: .94rem;
-        line-height: 1.5;
-        margin: .55rem 0 0;
-        max-width: 850px;
+        max-width: 900px;
+        font-size: .98rem;
+        line-height: 1.55;
+        margin: .7rem 0 0;
     }
 
-    .product-badge {
+    .hero-badge {
         flex: 0 0 auto;
-        border: 1px solid rgba(96, 165, 250, .35);
+        border: 1px solid rgba(96, 165, 250, .38);
         border-radius: 999px;
         color: #93C5FD;
-        font-size: .78rem;
-        font-weight: 700;
-        padding: .45rem .75rem;
+        font-size: .77rem;
+        font-weight: 750;
+        padding: .48rem .78rem;
         white-space: nowrap;
     }
 
-    div[data-testid="stMetric"] {
-        border: 1px solid rgba(148, 163, 184, .18);
+    .section-intro {
+        color: #94A3B8;
+        font-size: .91rem;
+        line-height: 1.55;
+        margin: -.25rem 0 .8rem;
+    }
+
+    .trust-strip {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: .7rem;
+        margin: .4rem 0 .95rem;
+    }
+
+    .trust-item {
+        border: 1px solid rgba(148, 163, 184, .16);
         border-radius: 12px;
-        padding: .65rem .8rem;
-        background: rgba(15, 23, 42, .24);
+        padding: .75rem .9rem;
+        background: rgba(15, 23, 42, .38);
+    }
+
+    .trust-label {
+        color: #94A3B8;
+        font-size: .72rem;
+        font-weight: 750;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .trust-value {
+        color: #E2E8F0;
+        font-size: .9rem;
+        font-weight: 650;
+        margin-top: .22rem;
+    }
+
+    div[data-testid="stMetric"] {
+        border: 1px solid rgba(148, 163, 184, .16);
+        border-radius: 13px;
+        padding: .7rem .85rem;
+        background: rgba(15, 23, 42, .32);
     }
 
     div[data-testid="stMetricValue"] {
@@ -134,27 +192,28 @@ st.markdown(
 
     div.stButton > button,
     div[data-testid="stDownloadButton"] > button {
-        min-height: 2.75rem;
+        min-height: 2.7rem;
         border-radius: 10px;
         font-weight: 700;
     }
 
     .engine-card {
-        border: 1px solid rgba(148, 163, 184, .18);
+        border: 1px solid rgba(148, 163, 184, .16);
         border-radius: 12px;
         padding: .85rem 1rem;
         min-height: 112px;
-        background: rgba(15, 23, 42, .24);
+        background: rgba(15, 23, 42, .30);
     }
 
     .engine-card h4 { margin: .2rem 0 .25rem; }
-    .engine-card p { color: #94A3B8; font-size: .85rem; margin: 0; }
-    .available { color: #4ADE80; font-size: .72rem; font-weight: 750; text-transform: uppercase; }
-    .planned { color: #FBBF24; font-size: .72rem; font-weight: 750; text-transform: uppercase; }
+    .engine-card p { color: #94A3B8; font-size: .84rem; margin: 0; }
+    .available { color: #4ADE80; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
+    .planned { color: #FBBF24; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
 
-    @media (max-width: 800px) {
-        .product-header { display: block; }
-        .product-badge { display: inline-block; margin-top: .75rem; }
+    @media (max-width: 850px) {
+        .hero { display: block; }
+        .hero-badge { display: inline-block; margin-top: .9rem; }
+        .trust-strip { grid-template-columns: 1fr; }
     }
 </style>
 """,
@@ -178,25 +237,84 @@ def determine_comparison(networkx_value: float, ladybug_value: float) -> dict:
     }
 
 
+@st.cache_data(show_spinner=False)
+def generate_preset_csv(
+    number_of_nodes: int,
+    number_of_edges: int,
+    seed: int,
+) -> bytes:
+    """Generate a deterministic graph in which every declared node appears."""
+    if number_of_nodes < 2:
+        raise ValueError("A generated preset requires at least two nodes")
+
+    if number_of_edges < number_of_nodes:
+        raise ValueError(
+            "The edge count must be at least the node count to guarantee coverage"
+        )
+
+    maximum_edges = number_of_nodes * (number_of_nodes - 1)
+    if number_of_edges > maximum_edges:
+        raise ValueError("Requested more unique directed edges than are possible")
+
+    edge_set = {
+        (node_id, (node_id + 1) % number_of_nodes) for node_id in range(number_of_nodes)
+    }
+    random_generator = random.Random(seed)
+
+    while len(edge_set) < number_of_edges:
+        source = random_generator.randrange(number_of_nodes)
+        target = random_generator.randrange(number_of_nodes)
+        if source != target:
+            edge_set.add((source, target))
+
+    dataframe = pd.DataFrame(
+        sorted(edge_set),
+        columns=["source", "target"],
+    )
+    return dataframe.to_csv(index=False).encode("utf-8")
+
+
+def choose_query_nodes(
+    number_of_nodes: int,
+    query_count: int,
+    sampling: str,
+    seed: int,
+) -> list[int]:
+    actual_count = min(query_count, number_of_nodes)
+
+    if sampling == "Contiguous nodes":
+        return list(range(actual_count))
+
+    random_generator = random.Random(seed)
+    return sorted(
+        random_generator.sample(
+            range(number_of_nodes),
+            actual_count,
+        )
+    )
+
+
 def run_benchmark(
     normalized_graph,
     configuration: dict,
     progress_bar=None,
     status_container=None,
 ) -> dict:
-    query_count = min(
-        configuration["query_count"],
-        normalized_graph.number_of_nodes,
+    query_nodes = choose_query_nodes(
+        number_of_nodes=normalized_graph.number_of_nodes,
+        query_count=configuration["query_count"],
+        sampling=configuration["query_sampling"],
+        seed=configuration["query_seed"],
     )
-    query_nodes = list(range(query_count))
+
     networkx_backend = NetworkXBackend()
     ladybug_backend = LadybugBackend()
 
     try:
         if status_container is not None:
-            status_container.info("Running NetworkX benchmark...")
+            status_container.info("Testing NetworkX...")
         if progress_bar is not None:
-            progress_bar.progress(10, text="Running NetworkX")
+            progress_bar.progress(10, text="Testing NetworkX")
 
         networkx_results = benchmark_backend(
             backend=networkx_backend,
@@ -210,9 +328,9 @@ def run_benchmark(
         )
 
         if status_container is not None:
-            status_container.info("NetworkX complete. Running LadybugDB...")
+            status_container.info("NetworkX complete. Testing LadybugDB...")
         if progress_bar is not None:
-            progress_bar.progress(48, text="Running LadybugDB")
+            progress_bar.progress(48, text="Testing LadybugDB")
 
         ladybug_results = benchmark_backend(
             backend=ladybug_backend,
@@ -226,9 +344,11 @@ def run_benchmark(
         )
 
         if status_container is not None:
-            status_container.info("Validating equivalent results...")
+            status_container.info(
+                "Checking that both engines returned the same answer..."
+            )
         if progress_bar is not None:
-            progress_bar.progress(88, text="Validating correctness")
+            progress_bar.progress(88, text="Checking correctness")
 
         neighbors_match = (
             networkx_results["neighbors"]["result"]
@@ -263,7 +383,12 @@ def run_benchmark(
             },
             "benchmark_configuration": {
                 **configuration,
-                "actual_query_count": query_count,
+                "actual_query_count": len(query_nodes),
+                "query_strategy": (
+                    "Adaptive range predicate"
+                    if configuration["query_sampling"] == "Contiguous nodes"
+                    else "Parameterized IN batch"
+                ),
             },
             "correctness": {
                 "passed": neighbors_match and nodes_match and edges_match,
@@ -307,47 +432,47 @@ def create_latency_chart(report: dict) -> None:
     dataframe = pd.DataFrame(
         [
             {
-                "Operation": "Construction",
-                "Backend": "NetworkX",
+                "Operation": "Build graph",
+                "Engine": "NetworkX",
                 "Latency": report["networkx"]["build_median_ms"],
             },
             {
-                "Operation": "Construction",
-                "Backend": "LadybugDB",
+                "Operation": "Build graph",
+                "Engine": "LadybugDB",
                 "Latency": report["ladybug"]["build_median_ms"],
             },
             {
-                "Operation": "Neighbor batch",
-                "Backend": "NetworkX",
+                "Operation": "Find neighbors",
+                "Engine": "NetworkX",
                 "Latency": report["networkx"]["query_median_ms"],
             },
             {
-                "Operation": "Neighbor batch",
-                "Backend": "LadybugDB",
+                "Operation": "Find neighbors",
+                "Engine": "LadybugDB",
                 "Latency": report["ladybug"]["query_median_ms"],
             },
         ]
     )
 
     scale_name = st.radio(
-        "Latency scale",
+        "Chart scale",
         ["Logarithmic", "Linear"],
-        index=0,
         horizontal=True,
         key="latency_scale",
+        help="Logarithmic scale keeps very small and large values visible together.",
     )
     scale = alt.Scale(
         type="log" if scale_name == "Logarithmic" else "linear",
-        zero=False if scale_name == "Logarithmic" else True,
+        zero=scale_name == "Linear",
         nice=True,
     )
 
     base = alt.Chart(dataframe).encode(
-        x=alt.X("Latency:Q", title="Median latency (ms)", scale=scale),
-        y=alt.Y("Operation:N", title=None, sort=["Construction", "Neighbor batch"]),
-        yOffset="Backend:N",
+        x=alt.X("Latency:Q", title="Median time (milliseconds)", scale=scale),
+        y=alt.Y("Operation:N", title=None, sort=["Build graph", "Find neighbors"]),
+        yOffset="Engine:N",
         color=alt.Color(
-            "Backend:N",
+            "Engine:N",
             scale=alt.Scale(
                 domain=list(ENGINE_COLORS),
                 range=list(ENGINE_COLORS.values()),
@@ -356,140 +481,260 @@ def create_latency_chart(report: dict) -> None:
         ),
         tooltip=[
             "Operation:N",
-            "Backend:N",
-            alt.Tooltip("Latency:Q", format=".6f", title="Median latency (ms)"),
+            "Engine:N",
+            alt.Tooltip("Latency:Q", format=".6f", title="Median milliseconds"),
         ],
     )
-    points = base.mark_circle(size=250)
+
+    points = base.mark_circle(size=260)
     labels = base.mark_text(align="left", dx=10, fontSize=12).encode(
-        text=alt.Text("Latency:Q", format=".6f")
+        text=alt.Text("Latency:Q", format=".4f")
     )
-    st.altair_chart((points + labels).properties(height=220), use_container_width=True)
+    st.altair_chart((points + labels).properties(height=230), width="stretch")
 
 
 def create_throughput_chart(report: dict) -> None:
     dataframe = pd.DataFrame(
         [
             {
-                "Backend": "NetworkX",
+                "Engine": "NetworkX",
                 "Batches per second": report["networkx"]["batch_throughput_per_second"],
             },
             {
-                "Backend": "LadybugDB",
+                "Engine": "LadybugDB",
                 "Batches per second": report["ladybug"]["batch_throughput_per_second"],
             },
         ]
     )
-    chart = (
-        alt.Chart(dataframe)
-        .mark_bar(cornerRadiusEnd=5, height=28)
-        .encode(
-            x=alt.X("Batches per second:Q", title="Estimated batches per second"),
-            y=alt.Y("Backend:N", title=None, sort=["NetworkX", "LadybugDB"]),
-            color=alt.Color(
-                "Backend:N",
-                scale=alt.Scale(
-                    domain=list(ENGINE_COLORS), range=list(ENGINE_COLORS.values())
-                ),
-                legend=None,
-            ),
-            tooltip=["Backend:N", alt.Tooltip("Batches per second:Q", format=",.2f")],
-        )
-        .properties(height=145)
+
+    scale_name = st.radio(
+        "Chart scale",
+        ["Logarithmic", "Linear"],
+        horizontal=True,
+        key="throughput_scale",
+        help="Use logarithmic scale when one engine's bar is too small to see.",
     )
-    st.altair_chart(chart, use_container_width=True)
+    scale = alt.Scale(
+        type="log" if scale_name == "Logarithmic" else "linear",
+        zero=scale_name == "Linear",
+        nice=True,
+    )
+
+    base = alt.Chart(dataframe).encode(
+        x=alt.X(
+            "Batches per second:Q",
+            title="Estimated complete query batches per second",
+            scale=scale,
+        ),
+        y=alt.Y("Engine:N", title=None, sort=["NetworkX", "LadybugDB"]),
+        color=alt.Color(
+            "Engine:N",
+            scale=alt.Scale(
+                domain=list(ENGINE_COLORS),
+                range=list(ENGINE_COLORS.values()),
+            ),
+            legend=None,
+        ),
+        tooltip=[
+            "Engine:N",
+            alt.Tooltip("Batches per second:Q", format=",.2f"),
+        ],
+    )
+
+    points = base.mark_circle(size=280)
+    labels = base.mark_text(align="left", dx=11, fontSize=12).encode(
+        text=alt.Text("Batches per second:Q", format=",.1f")
+    )
+    st.altair_chart((points + labels).properties(height=160), width="stretch")
 
 
-def create_resource_charts(resource_report: dict) -> None:
-    memory_data = pd.DataFrame(
+def create_resource_chart(resource_report: dict) -> None:
+    dataframe = pd.DataFrame(
         [
             {
-                "Backend": "NetworkX",
-                "Metric": "Additional peak",
-                "Memory (MB)": resource_report["networkx"]["additional_peak_memory_mb"],
+                "Engine": "NetworkX",
+                "Measurement": "Memory added",
+                "Memory": resource_report["networkx"]["additional_peak_memory_mb"],
             },
             {
-                "Backend": "NetworkX",
-                "Metric": "Process peak",
-                "Memory (MB)": resource_report["networkx"]["peak_memory_mb"],
+                "Engine": "NetworkX",
+                "Measurement": "Total process peak",
+                "Memory": resource_report["networkx"]["peak_memory_mb"],
             },
             {
-                "Backend": "LadybugDB",
-                "Metric": "Additional peak",
-                "Memory (MB)": resource_report["ladybug"]["additional_peak_memory_mb"],
+                "Engine": "LadybugDB",
+                "Measurement": "Memory added",
+                "Memory": resource_report["ladybug"]["additional_peak_memory_mb"],
             },
             {
-                "Backend": "LadybugDB",
-                "Metric": "Process peak",
-                "Memory (MB)": resource_report["ladybug"]["peak_memory_mb"],
+                "Engine": "LadybugDB",
+                "Measurement": "Total process peak",
+                "Memory": resource_report["ladybug"]["peak_memory_mb"],
             },
         ]
     )
-    memory_chart = (
-        alt.Chart(memory_data)
-        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+
+    chart = (
+        alt.Chart(dataframe)
+        .mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5)
         .encode(
-            x=alt.X("Backend:N", title=None),
-            xOffset="Metric:N",
-            y=alt.Y("Memory (MB):Q", title="Memory (MB)"),
+            x=alt.X("Engine:N", title=None),
+            xOffset="Measurement:N",
+            y=alt.Y("Memory:Q", title="Memory (MB)"),
             color=alt.Color(
-                "Metric:N",
+                "Measurement:N",
+                title=None,
                 scale=alt.Scale(
-                    domain=["Additional peak", "Process peak"],
+                    domain=["Memory added", "Total process peak"],
                     range=["#60A5FA", "#F59E0B"],
                 ),
-                legend=alt.Legend(title=None, orient="top"),
+                legend=alt.Legend(orient="top"),
             ),
             tooltip=[
-                "Backend:N",
-                "Metric:N",
-                alt.Tooltip("Memory (MB):Q", format=".2f"),
+                "Engine:N",
+                "Measurement:N",
+                alt.Tooltip("Memory:Q", format=".2f", title="MB"),
             ],
         )
-        .properties(height=220)
+        .properties(height=245)
     )
-    st.altair_chart(memory_chart, use_container_width=True)
+    st.altair_chart(chart, width="stretch")
 
 
-def show_benchmark_insight(report: dict) -> None:
-    if not report["correctness"]["passed"]:
-        st.error(
-            "The engines returned different results, so no recommendation is made."
-        )
-        return
-
-    if report["graph_health"]["nodes"] < 100:
-        st.warning(
-            "This graph is very small. Initialization and timer overhead can dominate the measured work."
-        )
-
-    build = report["build_comparison"]
-    query = report["query_comparison"]
-    st.markdown(f"""
-**Measured outcome**
-
-- **{build['winner']}** completed construction approximately **{build['speedup']:.2f}x faster**.
-- **{query['winner']}** completed the neighbor workload approximately **{query['speedup']:.2f}x faster**.
-""")
-    st.info(
-        "Choose an engine based on the target workload. NetworkX is an in-process graph-analysis library; "
-        "LadybugDB offers database capabilities such as Cypher and persistent graph storage."
+def create_ingestion_chart(dataframe: pd.DataFrame) -> None:
+    chart_data = dataframe[
+        [
+            "nodes",
+            "networkx_build_ms",
+            "ladybug_ready_ms",
+            "ladybug_adapter_total_ms",
+        ]
+    ].rename(
+        columns={
+            "networkx_build_ms": "NetworkX",
+            "ladybug_ready_ms": "LadybugDB native load",
+            "ladybug_adapter_total_ms": "LadybugDB including Arrow conversion",
+        }
     )
-    st.caption(
-        "The conclusion applies only to this dataset, workload, configuration, machine, and installed versions."
+    chart_data = chart_data.melt(
+        id_vars=["nodes"],
+        var_name="Measurement",
+        value_name="Latency",
+    )
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_line(point=True, strokeWidth=3)
+        .encode(
+            x=alt.X(
+                "nodes:Q",
+                title="Graph size (nodes)",
+                scale=alt.Scale(type="log"),
+                axis=alt.Axis(format="~s"),
+            ),
+            y=alt.Y(
+                "Latency:Q",
+                title="Median build time (ms)",
+                scale=alt.Scale(type="log"),
+            ),
+            color=alt.Color(
+                "Measurement:N", title=None, legend=alt.Legend(orient="top")
+            ),
+            tooltip=[
+                alt.Tooltip("nodes:Q", title="Nodes", format=","),
+                "Measurement:N",
+                alt.Tooltip("Latency:Q", title="Milliseconds", format=".4f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def create_query_scaling_chart(dataframe: pd.DataFrame) -> None:
+    batch_options = sorted(dataframe["batch_size"].unique().tolist())
+    selected_batch = st.select_slider(
+        "Requested nodes per query batch",
+        options=batch_options,
+        value=100 if 100 in batch_options else batch_options[0],
+    )
+
+    filtered = dataframe[dataframe["batch_size"] == selected_batch][
+        ["nodes", "networkx_warm_median_ms", "ladybug_warm_median_ms"]
+    ].rename(
+        columns={
+            "networkx_warm_median_ms": "NetworkX",
+            "ladybug_warm_median_ms": "LadybugDB",
+        }
+    )
+    chart_data = filtered.melt(
+        id_vars=["nodes"],
+        var_name="Engine",
+        value_name="Latency",
+    )
+
+    chart = (
+        alt.Chart(chart_data)
+        .mark_line(point=True, strokeWidth=3)
+        .encode(
+            x=alt.X(
+                "nodes:Q",
+                title="Graph size (nodes)",
+                scale=alt.Scale(type="log"),
+                axis=alt.Axis(format="~s"),
+            ),
+            y=alt.Y(
+                "Latency:Q",
+                title="Warm median query time (ms)",
+                scale=alt.Scale(type="log"),
+            ),
+            color=alt.Color(
+                "Engine:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=list(ENGINE_COLORS),
+                    range=list(ENGINE_COLORS.values()),
+                ),
+                legend=alt.Legend(orient="top"),
+            ),
+            tooltip=[
+                alt.Tooltip("nodes:Q", title="Nodes", format=","),
+                "Engine:N",
+                alt.Tooltip("Latency:Q", title="Milliseconds", format=".6f"),
+            ],
+        )
+        .properties(height=300)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def render_correctness_details(report: dict) -> None:
+    correctness = report["correctness"]
+    validation_columns = st.columns(3)
+    validation_columns[0].metric(
+        "Node counts",
+        "PASS" if correctness["node_counts_match"] else "FAIL",
+    )
+    validation_columns[1].metric(
+        "Edge counts",
+        "PASS" if correctness["edge_counts_match"] else "FAIL",
+    )
+    validation_columns[2].metric(
+        "Neighbor answers",
+        "PASS" if correctness["neighbor_results_match"] else "FAIL",
     )
 
 
 # -----------------------------------------------------------------------------
-# Compact sidebar: dataset and benchmark configuration
+# Sidebar configuration
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.title("GraphBench")
-    st.caption("Configure one reproducible comparison.")
+    st.title("Set up your test")
+    st.caption("Choose graph data and a repeatable workload.")
 
     data_source = st.radio(
-        "Graph source",
-        ["Sample dataset", "Upload CSV"],
+        "1. Choose graph data",
+        ["Sample dataset", "Generated preset", "Upload CSV"],
     )
 
     dataset_bytes = None
@@ -512,21 +757,59 @@ with st.sidebar:
         source_column = sample["source"]
         target_column = sample["target"]
         st.download_button(
-            "Download sample CSV",
+            "Download this sample",
             dataset_bytes,
             dataset_name,
             "text/csv",
-            use_container_width=True,
+            width="stretch",
         )
+
+    elif data_source == "Generated preset":
+        selected_preset = st.selectbox("Graph size", list(GENERATED_PRESETS))
+        preset = GENERATED_PRESETS[selected_preset]
+        st.caption(preset["description"])
+        st.caption(
+            f"Seed {preset['seed']} · {preset['nodes']:,} nodes · "
+            f"{preset['edges']:,} directed edges"
+        )
+
+        with st.spinner("Preparing the reproducible graph..."):
+            dataset_bytes = generate_preset_csv(
+                number_of_nodes=preset["nodes"],
+                number_of_edges=preset["edges"],
+                seed=preset["seed"],
+            )
+
+        dataset_name = (
+            f"synthetic_{preset['nodes']}_nodes_"
+            f"{preset['edges']}_edges_seed_{preset['seed']}.csv"
+        )
+        source_column = "source"
+        target_column = "target"
+
+        st.download_button(
+            "Download generated CSV",
+            dataset_bytes,
+            dataset_name,
+            "text/csv",
+            width="stretch",
+        )
+
+        if preset["nodes"] >= 100_000:
+            st.warning(
+                "This large test can take several minutes and may exceed free cloud limits."
+            )
+
     else:
         uploaded_file = st.file_uploader(
             "Edge-list CSV",
             type=["csv"],
-            help="Choose one source column and one target column.",
+            help="Each row should connect one source value to one target value.",
         )
         if uploaded_file is None:
             st.info("Upload a CSV to begin.")
             st.stop()
+
         dataset_bytes = uploaded_file.getvalue()
         dataset_name = uploaded_file.name
 
@@ -542,19 +825,42 @@ with st.sidebar:
 
     columns = list(preview_dataframe.columns)
     if data_source == "Upload CSV":
-        source_column = st.selectbox("Source column", columns, index=0)
+        source_column = st.selectbox("Starts at", columns, index=0)
         target_column = st.selectbox(
-            "Target column",
+            "Points to",
             columns,
             index=1 if len(columns) > 1 else 0,
         )
 
     if source_column == target_column:
-        st.error("Source and target columns must be different.")
+        st.error("The starting and destination columns must be different.")
         st.stop()
 
     st.divider()
-    benchmark_mode = st.radio("Benchmark mode", ["Quick", "Advanced"], horizontal=True)
+    st.markdown("#### 2. Choose the lookup pattern")
+    query_sampling = st.radio(
+        "Nodes to look up",
+        ["Random nodes", "Contiguous nodes"],
+        help=(
+            "Random nodes represent general lookups. Contiguous nodes allow LadybugDB "
+            "to use its tested range-query optimization."
+        ),
+    )
+    query_seed = st.number_input(
+        "Query seed",
+        min_value=0,
+        max_value=2_147_483_647,
+        value=42,
+        help="The same seed selects the same random nodes on repeated runs.",
+    )
+
+    st.divider()
+    st.markdown("#### 3. Choose test depth")
+    benchmark_mode = st.radio(
+        "Benchmark mode",
+        ["Quick", "Advanced"],
+        horizontal=True,
+    )
 
     if benchmark_mode == "Quick":
         configuration = {
@@ -564,8 +870,10 @@ with st.sidebar:
             "build_warmups": 1,
             "query_repetitions": 20,
             "query_warmups": 3,
+            "query_sampling": query_sampling,
+            "query_seed": int(query_seed),
         }
-        st.caption("5 builds, 20 query batches, automatic query sampling.")
+        st.caption("5 builds and 20 query batches. Best for first-time visitors.")
     else:
         with st.expander("Advanced settings", expanded=True):
             query_count = st.number_input("Nodes per query batch", 1, 1_000_000, 100)
@@ -573,6 +881,7 @@ with st.sidebar:
             build_warmups = st.number_input("Build warm-ups", 0, 10, 1)
             query_repetitions = st.number_input("Query repetitions", 1, 1_000, 50)
             query_warmups = st.number_input("Query warm-ups", 0, 100, 5)
+
         configuration = {
             "mode": "Advanced",
             "query_count": int(query_count),
@@ -580,6 +889,8 @@ with st.sidebar:
             "build_warmups": int(build_warmups),
             "query_repetitions": int(query_repetitions),
             "query_warmups": int(query_warmups),
+            "query_sampling": query_sampling,
+            "query_seed": int(query_seed),
         }
 
 
@@ -617,20 +928,40 @@ if st.session_state.get("active_benchmark_key") != benchmark_key:
 
 
 # -----------------------------------------------------------------------------
-# Main workspace
+# Main page
 # -----------------------------------------------------------------------------
 st.markdown(
     """
-<div class="product-header">
+<div class="hero">
     <div>
-        <div class="product-kicker">Reproducible graph-engine evaluation</div>
-        <h1 class="product-title">GraphBench</h1>
-        <p class="product-description">
-            Compare NetworkX and LadybugDB on the same graph and workload. Validate equivalent
-            results before examining latency, throughput, memory, and CPU behavior.
+        <div class="hero-kicker">Graph engine decision lab</div>
+        <h1 class="hero-title">GraphBench</h1>
+        <p class="hero-description">
+            Upload or generate a graph, run the same work in NetworkX and LadybugDB,
+            verify that both return the same answer, and see where each engine performs best.
         </p>
     </div>
-    <div class="product-badge">Open-source learning project</div>
+    <div class="hero-badge">Open-source learning project</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+<div class="trust-strip">
+    <div class="trust-item">
+        <div class="trust-label">Same input</div>
+        <div class="trust-value">Both engines receive one normalized graph</div>
+    </div>
+    <div class="trust-item">
+        <div class="trust-label">Correctness first</div>
+        <div class="trust-value">Speed claims appear only after answers match</div>
+    </div>
+    <div class="trust-item">
+        <div class="trust-label">Reproducible</div>
+        <div class="trust-value">Seeds, settings, versions, and dataset hash are recorded</div>
+    </div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -638,29 +969,30 @@ st.markdown(
 
 health_columns = st.columns(5)
 health_columns[0].metric("Nodes", f"{normalized_graph.number_of_nodes:,}")
-health_columns[1].metric("Edges", f"{normalized_graph.valid_rows:,}")
-health_columns[2].metric("Missing", f"{normalized_graph.missing_rows:,}")
-health_columns[3].metric("Duplicates", f"{normalized_graph.duplicate_edges:,}")
-health_columns[4].metric("Self-loops", f"{normalized_graph.self_loops:,}")
+health_columns[1].metric("Connections", f"{normalized_graph.valid_rows:,}")
+health_columns[2].metric("Rows removed", f"{normalized_graph.missing_rows:,}")
+health_columns[3].metric("Duplicates removed", f"{normalized_graph.duplicate_edges:,}")
+health_columns[4].metric("Self-connections", f"{normalized_graph.self_loops:,}")
 
-action_one, action_two = st.columns(2)
+action_one, action_two = st.columns([1.3, 1])
 run_performance = action_one.button(
-    "Run performance benchmark",
+    "Run speed and correctness test",
     type="primary",
-    use_container_width=True,
+    width="stretch",
 )
 run_resources = action_two.button(
-    "Run isolated resource profile",
-    use_container_width=True,
-    help="Runs each engine in a separate process for cleaner memory and CPU measurements.",
+    "Measure memory and CPU",
+    width="stretch",
+    help="Runs each engine separately for a cleaner resource comparison.",
 )
 
 status_container = st.empty()
-progress_bar = st.empty()
+progress_container = st.empty()
 
 if run_performance:
-    with progress_bar.container():
+    with progress_container.container():
         benchmark_progress = st.progress(0, text="Starting benchmark...")
+
     try:
         report = run_benchmark(
             normalized_graph,
@@ -676,15 +1008,15 @@ if run_performance:
         }
         report["environment"] = collect_environment_metadata()
         st.session_state["benchmark_report"] = report
-        status_container.success("Performance benchmark completed.")
-        progress_bar.empty()
+        status_container.success("Benchmark complete. Review the summary below.")
+        progress_container.empty()
     except Exception as error:
-        progress_bar.empty()
-        status_container.error(f"Performance benchmark failed: {error}")
+        progress_container.empty()
+        status_container.error(f"Benchmark failed: {error}")
 
 if run_resources:
-    with progress_bar.container():
-        resource_progress = st.progress(0, text="Preparing resource profile...")
+    with progress_container.container():
+        resource_progress = st.progress(0, text="Preparing resource measurement...")
 
     def update_resource_progress(percentage: int, message: str) -> None:
         resource_progress.progress(percentage, text=message)
@@ -704,183 +1036,382 @@ if run_resources:
         }
         resource_report["environment"] = collect_environment_metadata()
         st.session_state["resource_report"] = resource_report
-        status_container.success("Isolated resource profile completed.")
-        progress_bar.empty()
+        status_container.success("Resource measurement complete.")
+        progress_container.empty()
     except Exception as error:
-        progress_bar.empty()
-        status_container.error(f"Resource profiling failed: {error}")
+        progress_container.empty()
+        status_container.error(f"Resource measurement failed: {error}")
 
-
-workspace_tabs = st.tabs(
-    ["Results", "Latency", "Throughput", "Resources", "Data", "Project"]
-)
 
 report = st.session_state.get("benchmark_report")
 resource_report = st.session_state.get("resource_report")
 
+workspace_tabs = st.tabs(
+    [
+        "Overview",
+        "Performance",
+        "Scaling research",
+        "Resources",
+        "Your data",
+        "About",
+    ]
+)
+
+
 with workspace_tabs[0]:
     if report is None:
-        st.info("Run the performance benchmark to generate a comparison.")
+        st.subheader("Ready when you are")
+        st.markdown(
+            '<p class="section-intro">Choose data and settings in the sidebar, then run the speed and correctness test.</p>',
+            unsafe_allow_html=True,
+        )
+        getting_started = st.columns(3)
+        getting_started[0].info("1. Choose a sample, generated graph, or your own CSV.")
+        getting_started[1].info("2. Select random or contiguous node lookups.")
+        getting_started[2].info("3. Run the test and compare verified results.")
     else:
-        if report["correctness"]["passed"]:
-            st.success("Correctness PASS: both engines produced equivalent results.")
+        correctness = report["correctness"]
+        configuration_report = report["benchmark_configuration"]
+
+        if correctness["passed"]:
+            st.success("Trusted result: both engines returned equivalent answers.")
+            build = report["build_comparison"]
+            query = report["query_comparison"]
+
+            st.subheader("The short answer")
+            result_columns = st.columns(2)
+            result_columns[0].metric(
+                "Faster graph setup",
+                build["winner"],
+                f"{build['speedup']:.2f}× faster",
+            )
+            result_columns[1].metric(
+                "Faster neighbor lookup",
+                query["winner"],
+                f"{query['speedup']:.2f}× faster",
+            )
+
+            st.info(
+                "A winner applies only to this graph and workload. NetworkX is an "
+                "in-memory analysis library; LadybugDB adds persistent storage, Cypher, "
+                "and database-oriented analytical capabilities."
+            )
+
+            context_columns = st.columns(4)
+            context_columns[0].metric(
+                "Graph", f"{report['graph_health']['nodes']:,} nodes"
+            )
+            context_columns[1].metric(
+                "Lookup batch",
+                f"{configuration_report['actual_query_count']:,} nodes",
+            )
+            context_columns[2].metric(
+                "Lookup selection",
+                configuration_report["query_sampling"].replace(" nodes", ""),
+            )
+            context_columns[3].metric(
+                "Ladybug strategy",
+                configuration_report["query_strategy"],
+            )
         else:
-            st.error("Correctness FAIL: do not use these performance results.")
+            st.error(
+                "Results are not comparable because the engines returned different answers."
+            )
+            st.warning(
+                "Timings are retained only for debugging. GraphBench hides winner claims until all checks pass."
+            )
+            render_correctness_details(report)
 
-        build = report["build_comparison"]
-        query = report["query_comparison"]
-        columns = st.columns(4)
-        columns[0].metric(
-            "NetworkX build", f"{report['networkx']['build_median_ms']:.4f} ms"
-        )
-        columns[1].metric(
-            "LadybugDB build", f"{report['ladybug']['build_median_ms']:.4f} ms"
-        )
-        columns[2].metric(
-            "NetworkX query", f"{report['networkx']['query_median_ms']:.4f} ms"
-        )
-        columns[3].metric(
-            "LadybugDB query", f"{report['ladybug']['query_median_ms']:.4f} ms"
-        )
-
-        insight_one, insight_two = st.columns(2)
-        insight_one.info(
-            f"Construction: {build['winner']} was {build['speedup']:.2f}x faster."
-        )
-        insight_two.info(
-            f"Neighbor batch: {query['winner']} was {query['speedup']:.2f}x faster."
-        )
-        show_benchmark_insight(report)
 
 with workspace_tabs[1]:
+    st.subheader("Performance details")
+    st.markdown(
+        '<p class="section-intro">Latency means time taken; lower is better. Throughput means completed batches per second; higher is better.</p>',
+        unsafe_allow_html=True,
+    )
+
     if report is None:
-        st.info("Latency results appear after the performance benchmark.")
+        st.info("Run the speed and correctness test to see performance results.")
+    elif not report["correctness"]["passed"]:
+        st.warning(
+            "Performance charts are hidden because correctness validation failed."
+        )
+        render_correctness_details(report)
     else:
-        create_latency_chart(report)
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "Backend": "NetworkX",
-                        "Build median (ms)": report["networkx"]["build_median_ms"],
-                        "Build P95 (ms)": report["networkx"]["build_p95_ms"],
-                        "Query median (ms)": report["networkx"]["query_median_ms"],
-                        "Query P95 (ms)": report["networkx"]["query_p95_ms"],
-                    },
-                    {
-                        "Backend": "LadybugDB",
-                        "Build median (ms)": report["ladybug"]["build_median_ms"],
-                        "Build P95 (ms)": report["ladybug"]["build_p95_ms"],
-                        "Query median (ms)": report["ladybug"]["query_median_ms"],
-                        "Query P95 (ms)": report["ladybug"]["query_p95_ms"],
-                    },
-                ]
-            ),
-            use_container_width=True,
-            hide_index=True,
+        latency_tab, throughput_tab, table_tab = st.tabs(
+            ["Time taken", "Work completed", "Exact numbers"]
         )
 
-with workspace_tabs[2]:
-    if report is None:
-        st.info("Throughput results appear after the performance benchmark.")
-    else:
-        create_throughput_chart(report)
-        st.caption(
-            "Estimated throughput is derived from average batch latency; it is not a concurrent load test."
-        )
+        with latency_tab:
+            create_latency_chart(report)
+            st.caption(
+                "Lower values are better. P95 represents a slower result near the tail of repeated runs."
+            )
 
-with workspace_tabs[3]:
-    if resource_report is None:
-        st.info("Run the isolated resource profile to compare memory and CPU usage.")
-    else:
-        if resource_report["correctness"]:
-            st.success("Resource-profile correctness PASS.")
-        else:
-            st.error("Resource-profile correctness FAIL.")
+        with throughput_tab:
+            create_throughput_chart(report)
+            st.caption(
+                "Estimated throughput is calculated from average batch latency; it is not a concurrent multi-user load test."
+            )
 
-        nx_resource = resource_report["networkx"]
-        lb_resource = resource_report["ladybug"]
-        resource_columns = st.columns(4)
-        resource_columns[0].metric(
-            "NetworkX added memory",
-            f"{nx_resource['additional_peak_memory_mb']:.2f} MB",
-        )
-        resource_columns[1].metric(
-            "LadybugDB added memory",
-            f"{lb_resource['additional_peak_memory_mb']:.2f} MB",
-        )
-        resource_columns[2].metric(
-            "NetworkX CPU",
-            f"{nx_resource['cpu_utilization_percent']:.1f}%",
-        )
-        resource_columns[3].metric(
-            "LadybugDB CPU",
-            f"{lb_resource['cpu_utilization_percent']:.1f}%",
-        )
-
-        chart_column, table_column = st.columns([1.15, 1])
-        with chart_column:
-            create_resource_charts(resource_report)
-        with table_column:
+        with table_tab:
             st.dataframe(
                 pd.DataFrame(
                     [
                         {
-                            "Backend": "NetworkX",
-                            "Isolated build (ms)": nx_resource["elapsed_ms"],
-                            "Added peak (MB)": nx_resource["additional_peak_memory_mb"],
-                            "Process peak (MB)": nx_resource["peak_memory_mb"],
-                            "CPU (%)": nx_resource["cpu_utilization_percent"],
+                            "Engine": "NetworkX",
+                            "Build median (ms)": report["networkx"]["build_median_ms"],
+                            "Build P95 (ms)": report["networkx"]["build_p95_ms"],
+                            "Query median (ms)": report["networkx"]["query_median_ms"],
+                            "Query P95 (ms)": report["networkx"]["query_p95_ms"],
+                            "Batches/second": report["networkx"][
+                                "batch_throughput_per_second"
+                            ],
                         },
                         {
-                            "Backend": "LadybugDB",
-                            "Isolated build (ms)": lb_resource["elapsed_ms"],
-                            "Added peak (MB)": lb_resource["additional_peak_memory_mb"],
-                            "Process peak (MB)": lb_resource["peak_memory_mb"],
-                            "CPU (%)": lb_resource["cpu_utilization_percent"],
+                            "Engine": "LadybugDB",
+                            "Build median (ms)": report["ladybug"]["build_median_ms"],
+                            "Build P95 (ms)": report["ladybug"]["build_p95_ms"],
+                            "Query median (ms)": report["ladybug"]["query_median_ms"],
+                            "Query P95 (ms)": report["ladybug"]["query_p95_ms"],
+                            "Batches/second": report["ladybug"][
+                                "batch_throughput_per_second"
+                            ],
                         },
                     ]
                 ),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
-            st.caption(
-                "CPU can exceed 100% when a process uses more than one core. Tiny graphs are dominated by engine startup overhead."
+
+
+with workspace_tabs[2]:
+    st.subheader("Saved scaling research")
+    st.markdown(
+        '<p class="section-intro">These are precomputed development-machine experiments, not results from the graph currently selected in the sidebar.</p>',
+        unsafe_allow_html=True,
+    )
+
+    show_saved_research = st.toggle(
+        "Show saved research results",
+        value=False,
+        help="Open previously generated ingestion and query scalability studies.",
+    )
+
+    if not show_saved_research:
+        research_columns = st.columns(3)
+        research_columns[0].metric("Small graph", "1K nodes", "NetworkX setup wins")
+        research_columns[1].metric("Crossover", "10K nodes", "LadybugDB ingestion wins")
+        research_columns[2].metric(
+            "Large graph", "100K nodes", "LadybugDB ingestion scales"
+        )
+        st.info(
+            "The research found different winners for different jobs: LadybugDB scaled better for optimized bulk ingestion, while NetworkX remained faster for direct neighbor lookup."
+        )
+    else:
+        ingestion_tab, query_tab, strategy_tab = st.tabs(
+            ["Graph ingestion", "Neighbor lookup", "Query strategies"]
+        )
+
+        with ingestion_tab:
+            st.markdown("#### How graph setup scales")
+            st.write(
+                "LadybugDB uses sorted PyArrow tables, bulk COPY, and ANALYZE. Native load excludes Arrow conversion; adapter-inclusive load includes it."
             )
 
+            if not INGESTION_RESULTS_FILE.exists():
+                st.info(
+                    "Run `python run_ingestion_scalability.py` to create these results."
+                )
+            else:
+                ingestion_results = pd.read_csv(INGESTION_RESULTS_FILE)
+                create_ingestion_chart(ingestion_results)
+                st.dataframe(ingestion_results, width="stretch", hide_index=True)
+                st.success(
+                    "Observed result: NetworkX won the 1K-node setup, while LadybugDB won optimized ingestion at 10K and 100K nodes."
+                )
+
+        with query_tab:
+            st.markdown("#### How neighbor lookup scales")
+            st.write(
+                "Random node batches test a general lookup pattern. Lower latency is better. The logarithmic chart keeps both engines visible."
+            )
+
+            if not QUERY_RESULTS_FILE.exists():
+                st.info(
+                    "Run `python run_query_scalability.py` to create these results."
+                )
+            else:
+                query_results = pd.read_csv(QUERY_RESULTS_FILE)
+                create_query_scaling_chart(query_results)
+                st.dataframe(query_results, width="stretch", hide_index=True)
+                st.info(
+                    "Observed result: batching reduced LadybugDB's cost per requested node, but NetworkX remained faster for direct adjacency lookup."
+                )
+
+        with strategy_tab:
+            st.markdown("#### LadybugDB query-strategy experiment")
+            st.write(
+                "This test compared equivalent Cypher approaches for a contiguous 100-node batch on a 100K-node graph."
+            )
+
+            if not QUERY_STRATEGY_RESULTS_FILE.exists():
+                st.info(
+                    "Run `python compare_query_strategies.py` to create these results."
+                )
+            else:
+                strategy_results = pd.read_csv(QUERY_STRATEGY_RESULTS_FILE).sort_values(
+                    "warm_median_ms"
+                )
+                st.dataframe(strategy_results, width="stretch", hide_index=True)
+                fastest = strategy_results.iloc[0]
+                st.success(
+                    f"Fastest measured strategy: {fastest['strategy']} at "
+                    f"{fastest['warm_median_ms']:.4f} ms. Range lookup applies only to contiguous IDs."
+                )
+
+
+with workspace_tabs[3]:
+    st.subheader("Memory and CPU")
+    st.markdown(
+        '<p class="section-intro">Each engine runs in a separate process so one engine does not inherit the other engine\'s memory.</p>',
+        unsafe_allow_html=True,
+    )
+
+    if resource_report is None:
+        st.info("Select Measure memory and CPU above to create a resource comparison.")
+    else:
+        if resource_report["correctness"]:
+            st.success("Resource-test correctness passed.")
+        else:
+            st.error("Resource-test correctness failed; do not compare these numbers.")
+
+        networkx_resource = resource_report["networkx"]
+        ladybug_resource = resource_report["ladybug"]
+
+        resource_columns = st.columns(4)
+        resource_columns[0].metric(
+            "NetworkX memory added",
+            f"{networkx_resource['additional_peak_memory_mb']:.2f} MB",
+        )
+        resource_columns[1].metric(
+            "LadybugDB memory added",
+            f"{ladybug_resource['additional_peak_memory_mb']:.2f} MB",
+        )
+        resource_columns[2].metric(
+            "NetworkX CPU",
+            f"{networkx_resource['cpu_utilization_percent']:.1f}%",
+        )
+        resource_columns[3].metric(
+            "LadybugDB CPU",
+            f"{ladybug_resource['cpu_utilization_percent']:.1f}%",
+        )
+
+        chart_column, explanation_column = st.columns([1.35, 1])
+        with chart_column:
+            create_resource_chart(resource_report)
+        with explanation_column:
+            st.info(
+                "Memory added estimates the extra memory used while building the graph. Total process peak also includes Python and imported libraries."
+            )
+            st.caption(
+                "CPU may exceed 100% when native code uses more than one processor core. Small graphs are often dominated by startup overhead."
+            )
+
+
 with workspace_tabs[4]:
-    preview_column, health_column = st.columns([1.5, 1])
+    preview_column, explanation_column = st.columns([1.45, 1])
+
     with preview_column:
         st.subheader(dataset_name)
-        st.dataframe(
-            preview_dataframe.head(15), use_container_width=True, hide_index=True
-        )
+        st.dataframe(preview_dataframe.head(15), width="stretch", hide_index=True)
         st.caption(f"Showing 15 of {len(preview_dataframe):,} original rows.")
-    with health_column:
-        st.subheader("Normalization")
-        st.write(f"Source column: `{source_column}`")
-        st.write(f"Target column: `{target_column}`")
-        st.write(f"Missing rows removed: **{normalized_graph.missing_rows:,}**")
-        st.write(f"Duplicate edges removed: **{normalized_graph.duplicate_edges:,}**")
-        st.write(f"Self-loops retained: **{normalized_graph.self_loops:,}**")
+
+    with explanation_column:
+        st.subheader("Data preparation")
+        st.write(f"Starting-node column: `{source_column}`")
+        st.write(f"Destination-node column: `{target_column}`")
+        st.write(f"Rows missing an endpoint: **{normalized_graph.missing_rows:,}**")
+        st.write(
+            f"Duplicate connections removed: **{normalized_graph.duplicate_edges:,}**"
+        )
+        st.write(f"Self-connections retained: **{normalized_graph.self_loops:,}**")
+        st.info(
+            "GraphBench converts labels such as names or URLs into internal numeric IDs so both engines receive exactly the same graph."
+        )
+
 
 with workspace_tabs[5]:
-    about_column, roadmap_column = st.columns([1.25, 1])
-    with about_column:
-        st.subheader("What GraphBench demonstrates")
+    about_tab, methodology_tab, roadmap_tab = st.tabs(
+        ["Product", "Methodology", "Roadmap"]
+    )
+
+    with about_tab:
+        st.subheader("What GraphBench is")
         st.write(
-            "GraphBench evaluates in-memory graph libraries and embedded graph databases using "
-            "the same normalized data and equivalent operations. Correctness is checked before "
-            "performance results are presented."
+            "GraphBench is an interactive graph-engine evaluation product. It helps developers understand whether an in-memory analysis library or an embedded graph database better fits a particular workload."
         )
-        st.markdown(
-            "**Current measurements:** construction latency, neighbor-query latency, P95 latency, "
-            "estimated throughput, isolated memory, and isolated CPU usage."
+        st.write(
+            "The project demonstrates correctness validation, reproducible performance engineering, isolated resource measurement, user-data ingestion, query-plan investigation, and evidence-driven optimization."
         )
         st.caption(
-            "Python · NetworkX · LadybugDB · Cypher · Pandas · Streamlit · Altair"
+            "Python · NetworkX · LadybugDB · Cypher · PyArrow · Pandas · Streamlit · Altair"
         )
-    with roadmap_column:
+
+    with methodology_tab:
+        st.markdown("""
+#### How to read the results
+
+- **Build median:** typical time to create a fresh query-ready backend.
+- **Query median:** typical time for one complete neighbor-query batch.
+- **P95:** a slower tail result; 95% of measured runs finished at or below it.
+- **Throughput:** estimated batches per second from average latency, not a concurrent load test.
+- **Correctness:** node counts, edge counts, and returned neighbors must match before winner claims appear.
+
+#### LadybugDB optimizations applied
+
+- Sorted PyArrow bulk loading instead of Pandas ingestion.
+- `ANALYZE` after loading.
+- Parameterized Cypher for plan reuse.
+- Fresh backend for each build repetition, excluding previous-graph deletion.
+- Python-side result sorting instead of database `ORDER BY`.
+- Range predicates for contiguous batches and `IN` for arbitrary batches.
+
+#### Known limitation
+
+Profiling LadybugDB 0.20.3 showed node and relationship scans plus a target-node hash join for arbitrary batched neighbor lookup. This explains why NetworkX remains faster for direct adjacency access even when LadybugDB wins larger optimized ingestion workloads.
+""")
+
+        available_report = report or resource_report
+        st.divider()
+        st.markdown("#### Reproducibility record")
+
+        if available_report is None:
+            st.info(
+                "Run a benchmark or resource test to record this machine and package versions."
+            )
+        elif "environment" not in available_report:
+            st.info("Run this test again to create an environment record.")
+        else:
+            environment = available_report["environment"]
+            packages = environment["packages"]
+            system = environment["system"]
+
+            environment_columns = st.columns(4)
+            environment_columns[0].metric("Python", environment["python"]["version"])
+            environment_columns[1].metric("NetworkX", packages["networkx"])
+            environment_columns[2].metric("LadybugDB", packages["ladybug"])
+            environment_columns[3].metric("Machine", system["machine"])
+
+            st.caption(
+                f"Recorded {environment['timestamp_utc']} · Dataset SHA-256 "
+                f"{available_report['dataset']['sha256'][:16]}..."
+            )
+
+            with st.expander("Complete environment details"):
+                st.json(environment)
+
+    with roadmap_tab:
         st.subheader("Engine roadmap")
         engine_columns = st.columns(2)
         cards = [
@@ -899,6 +1430,7 @@ with workspace_tabs[5]:
                 "Compiled graph-analysis engines.",
             ),
         ]
+
         for index, (name, css_class, status, description) in enumerate(cards):
             with engine_columns[index % 2]:
                 st.markdown(
@@ -912,55 +1444,22 @@ with workspace_tabs[5]:
                     unsafe_allow_html=True,
                 )
 
-    available_report = report or resource_report
-
-    st.divider()
-    st.subheader("Reproducibility")
-
-    if available_report is None:
-        st.info(
-            "Run a performance benchmark or resource profile to "
-            "record the execution environment."
-        )
-    elif "environment" not in available_report:
-        st.info(
-            "This result was created before environment recording was added. "
-            "Run it again to create a reproducible report."
-        )
-    else:
-        environment = available_report["environment"]
-        packages = environment["packages"]
-        system = environment["system"]
-        python = environment["python"]
-
-        environment_columns = st.columns(4)
-        environment_columns[0].metric("Python", python["version"])
-        environment_columns[1].metric("NetworkX", packages["networkx"])
-        environment_columns[2].metric("LadybugDB", packages["ladybug"])
-        environment_columns[3].metric("Machine", system["machine"])
-
-        st.caption(
-            f"Recorded at {environment['timestamp_utc']} · "
-            f"Dataset SHA-256: {available_report['dataset']['sha256'][:16]}..."
-        )
-
-        with st.expander("Complete execution environment"):
-            st.json(environment)
-
 
 combined_report = {
     "performance": report,
     "resources": resource_report,
 }
+
 if report is not None or resource_report is not None:
     with st.sidebar:
         st.divider()
         st.download_button(
-            "Download current report",
+            "Download reproducibility report",
             json.dumps(combined_report, indent=2),
             "graphbench_report.json",
             "application/json",
-            use_container_width=True,
+            width="stretch",
         )
+
         with st.expander("Raw report"):
             st.json(combined_report)

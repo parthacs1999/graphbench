@@ -1,0 +1,4 @@
+nodes,edges,correctness,arrow_preparation_ms,networkx_build_ms,ladybug_copy_ms,ladybug_analyze_ms,ladybug_ready_ms,ladybug_adapter_total_ms,native_winner,native_speedup,adapter_winner,adapter_speedup
+1000,5000,True,0.6595,2.1042,4.1471,0.491,4.636,5.2955,NetworkX,2.2032,NetworkX,2.5166
+10000,50000,True,5.874,24.0527,10.3194,1.3138,11.6392,17.5132,LadybugDB,2.0665,LadybugDB,1.3734
+100000,500000,True,126.0421,427.4245,88.5539,9.8402,98.324,224.3661,LadybugDB,4.3471,LadybugDB,1.905

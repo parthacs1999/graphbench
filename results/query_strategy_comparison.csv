@@ -1,0 +1,5 @@
+strategy,correctness,nodes,edges,batch_size,returned_neighbors,cold_ms,warm_median_ms,warm_p95_ms,ms_per_requested_node,batches_per_second,requested_nodes_per_second
+Contiguous range,True,100000,500000,100,473,8.2035,5.04725,5.566417,0.050472505,198.13,19812.77
+IN batch,True,100000,500000,100,473,11.339709,6.54575,6.835458,0.0654575,152.77,15277.09
+Split MATCH,True,100000,500000,100,473,7.717208,6.628958,6.85275,0.066289585,150.85,15085.33
+Primary-key point queries,True,100000,500000,100,473,87.318333,82.962208,86.534875,0.82962208,12.05,1205.37
