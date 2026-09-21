@@ -1,0 +1,124 @@
+{
+  "component": "logging",
+  "graph_summary": {
+    "number_of_components": 19,
+    "number_of_dependencies": 24
+  },
+  "impact_summary": {
+    "direct_dependents": 5,
+    "indirect_dependents": 5,
+    "total_affected_components": 10,
+    "blast_radius_percent": 55.55555555555556,
+    "maximum_impact_depth": 3
+  },
+  "direct_dependents": [
+    "authentication",
+    "inventory_service",
+    "monitoring",
+    "payment_service",
+    "user_service"
+  ],
+  "indirect_dependents": [
+    "admin_portal",
+    "api_gateway",
+    "mobile_app",
+    "order_service",
+    "storefront"
+  ],
+  "all_affected_components": [
+    "admin_portal",
+    "api_gateway",
+    "authentication",
+    "inventory_service",
+    "mobile_app",
+    "monitoring",
+    "order_service",
+    "payment_service",
+    "storefront",
+    "user_service"
+  ],
+  "direct_dependencies_of_selected_component": [
+    "monitoring"
+  ],
+  "impact_layers": {
+    "1": [
+      "authentication",
+      "inventory_service",
+      "monitoring",
+      "payment_service",
+      "user_service"
+    ],
+    "2": [
+      "api_gateway",
+      "order_service"
+    ],
+    "3": [
+      "admin_portal",
+      "mobile_app",
+      "storefront"
+    ]
+  },
+  "impact_paths": {
+    "admin_portal": [
+      "admin_portal",
+      "api_gateway",
+      "authentication",
+      "logging"
+    ],
+    "api_gateway": [
+      "api_gateway",
+      "authentication",
+      "logging"
+    ],
+    "authentication": [
+      "authentication",
+      "logging"
+    ],
+    "inventory_service": [
+      "inventory_service",
+      "logging"
+    ],
+    "mobile_app": [
+      "mobile_app",
+      "api_gateway",
+      "authentication",
+      "logging"
+    ],
+    "monitoring": [
+      "monitoring",
+      "logging"
+    ],
+    "order_service": [
+      "order_service",
+      "payment_service",
+      "logging"
+    ],
+    "payment_service": [
+      "payment_service",
+      "logging"
+    ],
+    "storefront": [
+      "storefront",
+      "api_gateway",
+      "authentication",
+      "logging"
+    ],
+    "user_service": [
+      "user_service",
+      "logging"
+    ]
+  },
+  "cycle": {
+    "in_cycle": true,
+    "cycle_members": [
+      "logging",
+      "monitoring"
+    ]
+  },
+  "methodology": {
+    "edge_direction": "component -> depends_on",
+    "impact_direction": "Find components that can reach the selected component.",
+    "path_algorithm": "Breadth-first search on the reversed graph",
+    "path_type": "Unweighted shortest dependency path"
+  }
+}

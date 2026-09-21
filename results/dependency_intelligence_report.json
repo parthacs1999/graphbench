@@ -1,0 +1,742 @@
+{
+  "status": "review_recommended",
+  "executive_summary": {
+    "highest_pagerank_component": "logging",
+    "highest_pagerank_score": 0.27203722783167367,
+    "strongest_bottleneck": "api_gateway",
+    "strongest_betweenness_score": 0.11764705882352941,
+    "maximum_core": 2,
+    "deepest_core_size": 10,
+    "dependency_cycle_detected": true,
+    "cycle_members": [
+      "logging",
+      "monitoring"
+    ],
+    "representative_cycle": "logging -> monitoring -> logging"
+  },
+  "graph_health": {
+    "data_quality": {
+      "original_rows": 24,
+      "missing_rows": 0,
+      "empty_rows": 0,
+      "duplicate_edges": 0,
+      "self_loops": 0,
+      "valid_unique_edges": 24
+    },
+    "number_of_nodes": 19,
+    "number_of_edges": 24,
+    "density": 0.07017543859649122,
+    "weakly_connected_components": 1,
+    "strongly_connected_components": 18,
+    "is_directed_acyclic": false,
+    "representative_cycle": [
+      [
+        "logging",
+        "monitoring"
+      ],
+      [
+        "monitoring",
+        "logging"
+      ]
+    ],
+    "representative_cycle_text": "logging -> monitoring -> logging",
+    "warnings": [
+      "A dependency cycle was detected. Cycles can make build order, deployment order, and failure analysis more difficult."
+    ]
+  },
+  "review_candidates": [
+    {
+      "component": "logging",
+      "structural_signal_count": 4,
+      "signals": [
+        "High PageRank dependency",
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [
+        "Participates in a dependency cycle; PageRank may be reinforced by cyclic flow"
+      ],
+      "pagerank_rank": 1,
+      "pagerank": 0.27203722783167367,
+      "direct_dependents": 5,
+      "direct_dependencies": 1,
+      "betweenness_rank": 4,
+      "betweenness": 0.029411764705882353,
+      "transitive_dependents": 10,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": true,
+      "review_rank": 1
+    },
+    {
+      "component": "api_gateway",
+      "structural_signal_count": 4,
+      "signals": [
+        "High PageRank dependency",
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 3,
+      "pagerank": 0.05820901651681333,
+      "direct_dependents": 3,
+      "direct_dependencies": 3,
+      "betweenness_rank": 1,
+      "betweenness": 0.11764705882352941,
+      "transitive_dependents": 3,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 2
+    },
+    {
+      "component": "authentication",
+      "structural_signal_count": 3,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 6,
+      "pagerank": 0.03288946075248646,
+      "direct_dependents": 1,
+      "direct_dependencies": 3,
+      "betweenness_rank": 3,
+      "betweenness": 0.032679738562091505,
+      "transitive_dependents": 4,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 3
+    },
+    {
+      "component": "inventory_service",
+      "structural_signal_count": 3,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 13,
+      "pagerank": 0.025715586609222667,
+      "direct_dependents": 1,
+      "direct_dependencies": 2,
+      "betweenness_rank": 5,
+      "betweenness": 0.0196078431372549,
+      "transitive_dependents": 5,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 4
+    },
+    {
+      "component": "user_database",
+      "structural_signal_count": 2,
+      "signals": [
+        "High PageRank dependency",
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 4,
+      "pagerank": 0.04433939750540876,
+      "direct_dependents": 3,
+      "direct_dependencies": 0,
+      "betweenness_rank": 8,
+      "betweenness": 0.0,
+      "transitive_dependents": 7,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 5
+    },
+    {
+      "component": "data_warehouse",
+      "structural_signal_count": 2,
+      "signals": [
+        "High PageRank dependency",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 5,
+      "pagerank": 0.034980066255581574,
+      "direct_dependents": 2,
+      "direct_dependencies": 0,
+      "betweenness_rank": 9,
+      "betweenness": 0.0,
+      "transitive_dependents": 2,
+      "is_articulation_point": true,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 6
+    },
+    {
+      "component": "order_service",
+      "structural_signal_count": 2,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 7,
+      "pagerank": 0.03288946075248646,
+      "direct_dependents": 1,
+      "direct_dependencies": 3,
+      "betweenness_rank": 2,
+      "betweenness": 0.06535947712418301,
+      "transitive_dependents": 4,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 7
+    },
+    {
+      "component": "payment_service",
+      "structural_signal_count": 2,
+      "signals": [
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 14,
+      "pagerank": 0.025715586609222667,
+      "direct_dependents": 1,
+      "direct_dependencies": 2,
+      "betweenness_rank": 6,
+      "betweenness": 0.0196078431372549,
+      "transitive_dependents": 5,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 8
+    },
+    {
+      "component": "analytics",
+      "structural_signal_count": 2,
+      "signals": [
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 16,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 3,
+      "betweenness_rank": 16,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 9
+    },
+    {
+      "component": "monitoring",
+      "structural_signal_count": 1,
+      "signals": [
+        "High PageRank dependency"
+      ],
+      "cautions": [
+        "Participates in a dependency cycle; PageRank may be reinforced by cyclic flow"
+      ],
+      "pagerank_rank": 2,
+      "pagerank": 0.2476211821636095,
+      "direct_dependents": 1,
+      "direct_dependencies": 1,
+      "betweenness_rank": 13,
+      "betweenness": 0.0,
+      "transitive_dependents": 10,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": true,
+      "review_rank": 10
+    }
+  ],
+  "all_component_findings": [
+    {
+      "component": "logging",
+      "structural_signal_count": 4,
+      "signals": [
+        "High PageRank dependency",
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [
+        "Participates in a dependency cycle; PageRank may be reinforced by cyclic flow"
+      ],
+      "pagerank_rank": 1,
+      "pagerank": 0.27203722783167367,
+      "direct_dependents": 5,
+      "direct_dependencies": 1,
+      "betweenness_rank": 4,
+      "betweenness": 0.029411764705882353,
+      "transitive_dependents": 10,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": true,
+      "review_rank": 1
+    },
+    {
+      "component": "api_gateway",
+      "structural_signal_count": 4,
+      "signals": [
+        "High PageRank dependency",
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 3,
+      "pagerank": 0.05820901651681333,
+      "direct_dependents": 3,
+      "direct_dependencies": 3,
+      "betweenness_rank": 1,
+      "betweenness": 0.11764705882352941,
+      "transitive_dependents": 3,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 2
+    },
+    {
+      "component": "authentication",
+      "structural_signal_count": 3,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 6,
+      "pagerank": 0.03288946075248646,
+      "direct_dependents": 1,
+      "direct_dependencies": 3,
+      "betweenness_rank": 3,
+      "betweenness": 0.032679738562091505,
+      "transitive_dependents": 4,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 3
+    },
+    {
+      "component": "inventory_service",
+      "structural_signal_count": 3,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 13,
+      "pagerank": 0.025715586609222667,
+      "direct_dependents": 1,
+      "direct_dependencies": 2,
+      "betweenness_rank": 5,
+      "betweenness": 0.0196078431372549,
+      "transitive_dependents": 5,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 4
+    },
+    {
+      "component": "user_database",
+      "structural_signal_count": 2,
+      "signals": [
+        "High PageRank dependency",
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 4,
+      "pagerank": 0.04433939750540876,
+      "direct_dependents": 3,
+      "direct_dependencies": 0,
+      "betweenness_rank": 8,
+      "betweenness": 0.0,
+      "transitive_dependents": 7,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 5
+    },
+    {
+      "component": "data_warehouse",
+      "structural_signal_count": 2,
+      "signals": [
+        "High PageRank dependency",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 5,
+      "pagerank": 0.034980066255581574,
+      "direct_dependents": 2,
+      "direct_dependencies": 0,
+      "betweenness_rank": 9,
+      "betweenness": 0.0,
+      "transitive_dependents": 2,
+      "is_articulation_point": true,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 6
+    },
+    {
+      "component": "order_service",
+      "structural_signal_count": 2,
+      "signals": [
+        "Important dependency-path connector",
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 7,
+      "pagerank": 0.03288946075248646,
+      "direct_dependents": 1,
+      "direct_dependencies": 3,
+      "betweenness_rank": 2,
+      "betweenness": 0.06535947712418301,
+      "transitive_dependents": 4,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 7
+    },
+    {
+      "component": "payment_service",
+      "structural_signal_count": 2,
+      "signals": [
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 14,
+      "pagerank": 0.025715586609222667,
+      "direct_dependents": 1,
+      "direct_dependencies": 2,
+      "betweenness_rank": 6,
+      "betweenness": 0.0196078431372549,
+      "transitive_dependents": 5,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 8
+    },
+    {
+      "component": "analytics",
+      "structural_signal_count": 2,
+      "signals": [
+        "Member of the deepest structural core",
+        "Structural articulation point"
+      ],
+      "cautions": [],
+      "pagerank_rank": 16,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 3,
+      "betweenness_rank": 16,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": true,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 9
+    },
+    {
+      "component": "monitoring",
+      "structural_signal_count": 1,
+      "signals": [
+        "High PageRank dependency"
+      ],
+      "cautions": [
+        "Participates in a dependency cycle; PageRank may be reinforced by cyclic flow"
+      ],
+      "pagerank_rank": 2,
+      "pagerank": 0.2476211821636095,
+      "direct_dependents": 1,
+      "direct_dependencies": 1,
+      "betweenness_rank": 13,
+      "betweenness": 0.0,
+      "transitive_dependents": 10,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": true,
+      "review_rank": 10
+    },
+    {
+      "component": "user_service",
+      "structural_signal_count": 1,
+      "signals": [
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 8,
+      "pagerank": 0.03288946075248646,
+      "direct_dependents": 1,
+      "direct_dependencies": 2,
+      "betweenness_rank": 7,
+      "betweenness": 0.0196078431372549,
+      "transitive_dependents": 4,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 11
+    },
+    {
+      "component": "order_database",
+      "structural_signal_count": 1,
+      "signals": [
+        "Member of the deepest structural core"
+      ],
+      "cautions": [],
+      "pagerank_rank": 9,
+      "pagerank": 0.030361376661469017,
+      "direct_dependents": 2,
+      "direct_dependencies": 0,
+      "betweenness_rank": 10,
+      "betweenness": 0.0,
+      "transitive_dependents": 6,
+      "is_articulation_point": false,
+      "core_number": 2,
+      "is_deepest_core": true,
+      "in_dependency_cycle": false,
+      "review_rank": 12
+    },
+    {
+      "component": "inventory_database",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 10,
+      "pagerank": 0.027326030373668,
+      "direct_dependents": 1,
+      "direct_dependencies": 0,
+      "betweenness_rank": 12,
+      "betweenness": 0.0,
+      "transitive_dependents": 6,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 13
+    },
+    {
+      "component": "payment_gateway",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 11,
+      "pagerank": 0.027326030373668,
+      "direct_dependents": 1,
+      "direct_dependencies": 0,
+      "betweenness_rank": 14,
+      "betweenness": 0.0,
+      "transitive_dependents": 6,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 14
+    },
+    {
+      "component": "crypto_service",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 12,
+      "pagerank": 0.025715586609222667,
+      "direct_dependents": 1,
+      "direct_dependencies": 0,
+      "betweenness_rank": 11,
+      "betweenness": 0.0,
+      "transitive_dependents": 5,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 15
+    },
+    {
+      "component": "admin_portal",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 15,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 1,
+      "betweenness_rank": 15,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 16
+    },
+    {
+      "component": "mobile_app",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 17,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 1,
+      "betweenness_rank": 17,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 17
+    },
+    {
+      "component": "reporting",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 18,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 1,
+      "betweenness_rank": 18,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 18
+    },
+    {
+      "component": "storefront",
+      "structural_signal_count": 0,
+      "signals": [
+        "No top structural signal in the current analysis"
+      ],
+      "cautions": [],
+      "pagerank_rank": 19,
+      "pagerank": 0.01639690604659617,
+      "direct_dependents": 0,
+      "direct_dependencies": 1,
+      "betweenness_rank": 19,
+      "betweenness": 0.0,
+      "transitive_dependents": 0,
+      "is_articulation_point": false,
+      "core_number": 1,
+      "is_deepest_core": false,
+      "in_dependency_cycle": false,
+      "review_rank": 19
+    }
+  ],
+  "articulation_points": [
+    "analytics",
+    "api_gateway",
+    "authentication",
+    "data_warehouse",
+    "inventory_service",
+    "logging",
+    "payment_service"
+  ],
+  "bridges": [
+    [
+      "admin_portal",
+      "api_gateway"
+    ],
+    [
+      "analytics",
+      "data_warehouse"
+    ],
+    [
+      "api_gateway",
+      "mobile_app"
+    ],
+    [
+      "api_gateway",
+      "storefront"
+    ],
+    [
+      "authentication",
+      "crypto_service"
+    ],
+    [
+      "data_warehouse",
+      "reporting"
+    ],
+    [
+      "inventory_database",
+      "inventory_service"
+    ],
+    [
+      "logging",
+      "monitoring"
+    ],
+    [
+      "payment_gateway",
+      "payment_service"
+    ]
+  ],
+  "deepest_core_components": [
+    "analytics",
+    "api_gateway",
+    "authentication",
+    "inventory_service",
+    "logging",
+    "order_database",
+    "order_service",
+    "payment_service",
+    "user_database",
+    "user_service"
+  ],
+  "methodology": {
+    "edge_direction": "component -> depends_on",
+    "pagerank_alpha": 0.85,
+    "pagerank_weight": null,
+    "betweenness_mode": "exact",
+    "betweenness_samples": null,
+    "k_core_direction": "undirected projection",
+    "random_seed": 42
+  },
+  "warnings": [
+    "A dependency cycle was detected. Cycles can make build order, deployment order, and failure analysis more difficult.",
+    "Articulation points and bridges are calculated on an undirected projection of the dependency graph.",
+    "K-core was calculated on an undirected projection, so dependency direction was ignored."
+  ]
+}
