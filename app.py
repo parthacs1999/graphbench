@@ -1,219 +1,162 @@
 import hashlib
 import io
 import json
-import random
 from pathlib import Path
+from typing import Any
 
 import altair as alt
+import networkx as nx
 import pandas as pd
 import streamlit as st
 
-from backends.ladybug_backend import LadybugBackend
-from backends.networkx_backend import NetworkXBackend
-from benchmarks.isolated_resources import compare_graph_resources
+from analysis.impact_analysis import analyze_dependency_impact
+from analysis.dependency_report import generate_dependency_intelligence_report
 from benchmarks.reproducibility import collect_environment_metadata
-from benchmarks.runner import benchmark_backend
 from ingestion.csv_loader import load_edge_csv
 
 st.set_page_config(
-    page_title="GraphBench",
-    page_icon=None,
+    page_title="GraphBench Dependency Intelligence",
+    page_icon="🔗",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
-SAMPLE_DATASETS = {
-    "Social network": {
-        "path": Path("data/sample_social_network.csv"),
-        "source": "follower",
-        "target": "followed",
-        "description": "People connected by directed follow relationships.",
-    },
-    "Web links": {
-        "path": Path("data/sample_web_links.csv"),
-        "source": "source_page",
-        "target": "target_page",
-        "description": "Web pages connected by directed hyperlinks.",
-    },
-    "Package dependencies": {
-        "path": Path("data/sample_dependencies.csv"),
-        "source": "package",
-        "target": "depends_on",
-        "description": "Software packages connected to their dependencies.",
-    },
-}
-
-GENERATED_PRESETS = {
-    "Medium — 10K nodes / 50K edges": {
-        "nodes": 10_000,
-        "edges": 50_000,
-        "seed": 42,
-        "description": "A reproducible medium-sized directed graph.",
-    },
-    "Large — 100K nodes / 500K edges": {
-        "nodes": 100_000,
-        "edges": 500_000,
-        "seed": 42,
-        "description": "A larger reproducible graph for scalability testing.",
-    },
-}
-
-ENGINE_COLORS = {
-    "NetworkX": "#3B82F6",
-    "LadybugDB": "#F59E0B",
-}
-
-INGESTION_RESULTS_FILE = Path("results/ingestion_scalability.csv")
-QUERY_RESULTS_FILE = Path("results/query_scalability.csv")
-QUERY_STRATEGY_RESULTS_FILE = Path("results/query_strategy_comparison.csv")
+SAMPLE_FILE = Path("data/sample_dependency_risk.csv")
+MAX_ANALYSIS_NODES = 2_000
 
 
 st.markdown(
     """
 <style>
     .block-container {
-        max-width: 1440px;
-        padding-top: 1.15rem;
-        padding-bottom: 2.5rem;
+        max-width: 1180px;
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
     }
 
-    .stApp {
-        background:
-            radial-gradient(circle at 6% 0%, rgba(59, 130, 246, .11), transparent 30rem),
-            radial-gradient(circle at 95% 2%, rgba(245, 158, 11, .08), transparent 28rem),
-            #0B0F17;
-    }
-
-    section[data-testid="stSidebar"] {
-        background: rgba(10, 15, 24, .96);
-        border-right: 1px solid rgba(148, 163, 184, .16);
+    [data-testid="stSidebar"], [data-testid="collapsedControl"] {
+        display: none;
     }
 
     .hero {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 2rem;
-        padding: 1.35rem 1.5rem;
-        margin-bottom: .85rem;
-        border: 1px solid rgba(148, 163, 184, .18);
-        border-radius: 18px;
-        background: linear-gradient(135deg, rgba(15, 23, 42, .92), rgba(17, 24, 39, .72));
-        box-shadow: 0 18px 50px rgba(0, 0, 0, .16);
+        border: 1px solid rgba(148, 163, 184, .20);
+        border-radius: 22px;
+        padding: 1.5rem 1.65rem;
+        background:
+            radial-gradient(circle at 95% 0%, rgba(59, 130, 246, .16), transparent 22rem),
+            rgba(15, 23, 42, .36);
+        margin-bottom: 1rem;
     }
 
-    .hero-kicker {
+    .eyebrow {
         color: #60A5FA;
-        font-size: .72rem;
+        font-size: .74rem;
         font-weight: 800;
-        letter-spacing: .15em;
+        letter-spacing: .14em;
         text-transform: uppercase;
-        margin-bottom: .35rem;
+        margin-bottom: .45rem;
     }
 
-    .hero-title {
-        font-size: 2.35rem;
-        font-weight: 800;
-        letter-spacing: -.045em;
+    .hero h1 {
+        font-size: clamp(2.1rem, 5vw, 3.45rem);
+        letter-spacing: -.055em;
         line-height: 1;
         margin: 0;
     }
 
-    .hero-description {
+    .hero p {
         color: #CBD5E1;
-        max-width: 900px;
-        font-size: .98rem;
-        line-height: 1.55;
-        margin: .7rem 0 0;
+        font-size: 1.02rem;
+        line-height: 1.65;
+        max-width: 790px;
+        margin: .85rem 0 0;
     }
 
-    .hero-badge {
-        flex: 0 0 auto;
-        border: 1px solid rgba(96, 165, 250, .38);
-        border-radius: 999px;
-        color: #93C5FD;
-        font-size: .77rem;
-        font-weight: 750;
-        padding: .48rem .78rem;
-        white-space: nowrap;
+    .empty-state {
+        text-align: center;
+        border: 1px dashed rgba(96, 165, 250, .36);
+        border-radius: 20px;
+        padding: 3.2rem 2rem 2.7rem;
+        margin-top: 1.1rem;
+        background: rgba(15, 23, 42, .22);
     }
 
-    .section-intro {
+    .empty-state h2 {
+        margin: 0 0 .65rem;
+        letter-spacing: -.035em;
+    }
+
+    .empty-state p {
         color: #94A3B8;
-        font-size: .91rem;
-        line-height: 1.55;
-        margin: -.25rem 0 .8rem;
+        max-width: 650px;
+        margin: 0 auto 1.4rem;
+        line-height: 1.6;
     }
 
-    .trust-strip {
+    .step-strip {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: .7rem;
-        margin: .4rem 0 .95rem;
+        gap: .65rem;
+        margin: 1.1rem 0;
     }
 
-    .trust-item {
-        border: 1px solid rgba(148, 163, 184, .16);
+    .step-item {
+        border: 1px solid rgba(148, 163, 184, .18);
         border-radius: 12px;
-        padding: .75rem .9rem;
-        background: rgba(15, 23, 42, .38);
-    }
-
-    .trust-label {
+        padding: .8rem .9rem;
         color: #94A3B8;
-        font-size: .72rem;
-        font-weight: 750;
-        letter-spacing: .08em;
-        text-transform: uppercase;
+        font-size: .86rem;
     }
 
-    .trust-value {
-        color: #E2E8F0;
-        font-size: .9rem;
-        font-weight: 650;
-        margin-top: .22rem;
+    .step-item strong { color: #E2E8F0; display: block; margin-bottom: .2rem; }
+    .step-item.active { border-color: #60A5FA; background: rgba(59, 130, 246, .10); }
+
+    .summary-card, div[data-testid="stMetric"] {
+        border: 1px solid rgba(148, 163, 184, .18);
+        border-radius: 14px;
+        padding: .75rem .9rem;
+        background: rgba(15, 23, 42, .25);
     }
 
-    div[data-testid="stMetric"] {
-        border: 1px solid rgba(148, 163, 184, .16);
-        border-radius: 13px;
-        padding: .7rem .85rem;
-        background: rgba(15, 23, 42, .32);
+    .summary-card {
+        min-height: 132px;
+        padding: 1rem 1.05rem;
     }
 
-    div[data-testid="stMetricValue"] {
-        font-size: 1.35rem;
-    }
-
-    div[data-testid="stMetricLabel"] {
+    .summary-card .label {
+        color: #94A3B8;
         font-size: .78rem;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: .07em;
     }
 
-    div.stButton > button,
-    div[data-testid="stDownloadButton"] > button {
-        min-height: 2.7rem;
+    .summary-card h3 { margin: .45rem 0 .35rem; font-size: 1.22rem; }
+    .summary-card p { color: #94A3B8; margin: 0; font-size: .87rem; line-height: 1.45; }
+
+    .action-card {
+        border-left: 3px solid #60A5FA;
+        border-radius: 10px;
+        padding: .9rem 1rem;
+        background: rgba(30, 41, 59, .48);
+        min-height: 118px;
+    }
+
+    .action-card strong { display: block; margin-bottom: .35rem; }
+    .action-card span { color: #A8B3C7; font-size: .88rem; line-height: 1.5; }
+
+    .section-intro { color: #94A3B8; margin-top: -.35rem; }
+
+    div.stButton > button, div[data-testid="stDownloadButton"] > button {
+        min-height: 2.75rem;
         border-radius: 10px;
         font-weight: 700;
     }
 
-    .engine-card {
-        border: 1px solid rgba(148, 163, 184, .16);
-        border-radius: 12px;
-        padding: .85rem 1rem;
-        min-height: 112px;
-        background: rgba(15, 23, 42, .30);
-    }
-
-    .engine-card h4 { margin: .2rem 0 .25rem; }
-    .engine-card p { color: #94A3B8; font-size: .84rem; margin: 0; }
-    .available { color: #4ADE80; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
-    .planned { color: #FBBF24; font-size: .7rem; font-weight: 800; text-transform: uppercase; }
-
-    @media (max-width: 850px) {
-        .hero { display: block; }
-        .hero-badge { display: inline-block; margin-top: .9rem; }
-        .trust-strip { grid-template-columns: 1fr; }
+    @media (max-width: 760px) {
+        .step-strip { grid-template-columns: 1fr; }
+        .hero { padding: 1.2rem; }
     }
 </style>
 """,
@@ -221,1595 +164,1301 @@ st.markdown(
 )
 
 
-def determine_comparison(networkx_value: float, ladybug_value: float) -> dict:
-    if networkx_value <= 0 or ladybug_value <= 0:
-        return {"winner": "Inconclusive", "speedup": 0.0}
+def find_first(data: Any, keys: set[str]) -> Any:
+    """Find the first matching key in a nested report."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in keys and value not in (None, "", []):
+                return value
+        for value in data.values():
+            found = find_first(value, keys)
+            if found is not None:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = find_first(item, keys)
+            if found is not None:
+                return found
+    return None
 
-    if networkx_value < ladybug_value:
-        return {
-            "winner": "NetworkX",
-            "speedup": ladybug_value / networkx_value,
-        }
+
+def number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def get_candidates(report: dict) -> list[dict]:
+    candidates = (
+        report.get("review_candidates")
+        or report.get("components_for_review")
+        or report.get("ranked_components")
+        or []
+    )
+    return candidates if isinstance(candidates, list) else []
+
+
+def candidate_value(candidate: dict, *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in candidate and candidate[key] is not None:
+            return candidate[key]
+    return default
+
+
+def summarize_report(report: dict) -> dict:
+    candidates = get_candidates(report)
+
+    pagerank_candidate = max(
+        candidates,
+        key=lambda item: number(
+            candidate_value(item, "pagerank", "pagerank_score", default=0)
+        ),
+        default={},
+    )
+    bottleneck_candidate = max(
+        candidates,
+        key=lambda item: number(
+            candidate_value(item, "betweenness", "betweenness_score", default=0)
+        ),
+        default={},
+    )
+
+    highest_raw = find_first(
+        report,
+        {"highest_pagerank", "highest_pagerank_component", "most_critical_component"},
+    )
+    if isinstance(highest_raw, dict):
+        highest_component = highest_raw.get("component", highest_raw.get("name"))
+        highest_score = number(highest_raw.get("score", highest_raw.get("pagerank")))
+    else:
+        highest_component = highest_raw
+        highest_score = number(
+            find_first(report, {"highest_pagerank_score", "top_pagerank_score"})
+        )
+
+    if not highest_component:
+        highest_component = candidate_value(
+            pagerank_candidate, "component", "name", default="Not available"
+        )
+    if highest_score == 0:
+        highest_score = number(
+            candidate_value(pagerank_candidate, "pagerank", "pagerank_score", default=0)
+        )
+
+    bottleneck_raw = find_first(
+        report,
+        {"strongest_bottleneck", "strongest_bottleneck_component", "top_bottleneck"},
+    )
+    if isinstance(bottleneck_raw, dict):
+        bottleneck_component = bottleneck_raw.get(
+            "component", bottleneck_raw.get("name")
+        )
+        bottleneck_score = number(
+            bottleneck_raw.get("score", bottleneck_raw.get("betweenness"))
+        )
+    else:
+        bottleneck_component = bottleneck_raw
+        bottleneck_score = number(
+            find_first(report, {"strongest_bottleneck_score", "top_betweenness_score"})
+        )
+
+    if not bottleneck_component:
+        bottleneck_component = candidate_value(
+            bottleneck_candidate, "component", "name", default="Not available"
+        )
+    if bottleneck_score == 0:
+        bottleneck_score = number(
+            candidate_value(
+                bottleneck_candidate,
+                "betweenness",
+                "betweenness_score",
+                default=0,
+            )
+        )
+
+    cycle = find_first(report, {"representative_cycle", "dependency_cycle", "cycle"})
+    if isinstance(cycle, bool):
+        cycle = None
+
+    maximum_core = number(
+        find_first(report, {"maximum_core_number", "max_core_number", "deepest_core"})
+    )
+    deepest_size = number(
+        find_first(report, {"deepest_core_size", "deepest_core_component_count"})
+    )
 
     return {
-        "winner": "LadybugDB",
-        "speedup": networkx_value / ladybug_value,
+        "status": find_first(report, {"status"}) or "review_recommended",
+        "highest_component": str(highest_component),
+        "highest_score": highest_score,
+        "bottleneck_component": str(bottleneck_component),
+        "bottleneck_score": bottleneck_score,
+        "cycle": cycle,
+        "maximum_core": int(maximum_core),
+        "deepest_size": int(deepest_size),
+        "candidates": candidates,
     }
 
 
 @st.cache_data(show_spinner=False)
-def generate_preset_csv(
-    number_of_nodes: int,
-    number_of_edges: int,
-    seed: int,
-) -> bytes:
-    """Generate a deterministic graph in which every declared node appears."""
-    if number_of_nodes < 2:
-        raise ValueError("A generated preset requires at least two nodes")
+def build_graph_visualization(
+    edges: tuple[tuple[str, str], ...],
+    lens: str,
+    maximum_visible_nodes: int = 100,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+    """Create a readable, metric-aware subgraph for the selected analysis lens."""
+    graph = nx.DiGraph()
+    graph.add_edges_from(edges)
 
-    if number_of_edges < number_of_nodes:
-        raise ValueError(
-            "The edge count must be at least the node count to guarantee coverage"
+    if graph.number_of_nodes() == 0:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), {}
+
+    pagerank = nx.pagerank(graph, alpha=0.85)
+    if graph.number_of_nodes() <= 500:
+        betweenness = nx.betweenness_centrality(graph, normalized=True)
+        betweenness_method = "exact"
+    else:
+        sample_size = min(100, graph.number_of_nodes())
+        betweenness = nx.betweenness_centrality(
+            graph,
+            k=sample_size,
+            normalized=True,
+            seed=42,
+        )
+        betweenness_method = f"approximate ({sample_size} sampled nodes)"
+
+    undirected = graph.to_undirected()
+    core_numbers = nx.core_number(undirected) if graph.number_of_nodes() else {}
+
+    cycle_nodes: set[str] = set()
+    for component in nx.strongly_connected_components(graph):
+        if len(component) > 1:
+            cycle_nodes.update(str(node) for node in component)
+        elif component:
+            node = next(iter(component))
+            if graph.has_edge(node, node):
+                cycle_nodes.add(str(node))
+
+    if lens == "Critical dependencies":
+        metric = pagerank
+        metric_title = "PageRank"
+    elif lens == "Path bottlenecks":
+        metric = betweenness
+        metric_title = "Betweenness"
+    elif lens == "Structural core":
+        metric = core_numbers
+        metric_title = "Core number"
+    else:
+        metric = {node: 1 if str(node) in cycle_nodes else 0 for node in graph.nodes}
+        metric_title = "Cycle member"
+
+    ranked_nodes = sorted(
+        graph.nodes,
+        key=lambda node: (
+            float(metric.get(node, 0)),
+            float(pagerank.get(node, 0)),
+            graph.degree(node),
+        ),
+        reverse=True,
+    )
+
+    if graph.number_of_nodes() <= maximum_visible_nodes:
+        visible_nodes = set(graph.nodes)
+        focused = False
+    else:
+        visible_nodes = set(ranked_nodes[: min(60, maximum_visible_nodes)])
+        for node in list(visible_nodes):
+            visible_nodes.update(graph.predecessors(node))
+            visible_nodes.update(graph.successors(node))
+            if len(visible_nodes) >= maximum_visible_nodes:
+                break
+        visible_nodes = set(
+            sorted(
+                visible_nodes,
+                key=lambda node: (
+                    float(metric.get(node, 0)),
+                    float(pagerank.get(node, 0)),
+                ),
+                reverse=True,
+            )[:maximum_visible_nodes]
+        )
+        focused = True
+
+    view = graph.subgraph(visible_nodes).copy()
+    positions = nx.spring_layout(
+        view,
+        seed=42,
+        iterations=80 if view.number_of_nodes() <= 100 else 40,
+        k=None,
+    )
+
+    metric_values = [float(metric.get(node, 0)) for node in view.nodes]
+    maximum_metric = max(metric_values, default=0)
+
+    node_rows = []
+    for node in view.nodes:
+        metric_value = float(metric.get(node, 0))
+        normalized_metric = metric_value / maximum_metric if maximum_metric > 0 else 0
+        node_rows.append(
+            {
+                "node": str(node),
+                "x": float(positions[node][0]),
+                "y": float(positions[node][1]),
+                "metric": metric_value,
+                "metric_label": metric_title,
+                "size": 120 + (1_050 * normalized_metric),
+                "pagerank": float(pagerank.get(node, 0)),
+                "betweenness": float(betweenness.get(node, 0)),
+                "core": int(core_numbers.get(node, 0)),
+                "cycle_status": (
+                    "In dependency cycle"
+                    if str(node) in cycle_nodes
+                    else "Not in cycle"
+                ),
+                "in_cycle": str(node) in cycle_nodes,
+                "dependencies": int(graph.out_degree(node)),
+                "dependents": int(graph.in_degree(node)),
+            }
         )
 
-    maximum_edges = number_of_nodes * (number_of_nodes - 1)
-    if number_of_edges > maximum_edges:
-        raise ValueError("Requested more unique directed edges than are possible")
+    edge_rows = []
+    for source, target in view.edges:
+        edge_rows.append(
+            {
+                "source": str(source),
+                "target": str(target),
+                "x": float(positions[source][0]),
+                "y": float(positions[source][1]),
+                "x2": float(positions[target][0]),
+                "y2": float(positions[target][1]),
+                "cycle_edge": str(source) in cycle_nodes and str(target) in cycle_nodes,
+            }
+        )
 
-    edge_set = {
-        (node_id, (node_id + 1) % number_of_nodes) for node_id in range(number_of_nodes)
+    label_nodes = set(ranked_nodes[:8])
+    if view.number_of_nodes() <= 20:
+        label_nodes = set(view.nodes)
+    label_rows = [row for row in node_rows if row["node"] in label_nodes]
+
+    metadata = {
+        "total_nodes": graph.number_of_nodes(),
+        "visible_nodes": view.number_of_nodes(),
+        "total_edges": graph.number_of_edges(),
+        "visible_edges": view.number_of_edges(),
+        "focused": focused,
+        "metric_title": metric_title,
+        "betweenness_method": betweenness_method,
+        "cycle_nodes": len(cycle_nodes),
     }
-    random_generator = random.Random(seed)
-
-    while len(edge_set) < number_of_edges:
-        source = random_generator.randrange(number_of_nodes)
-        target = random_generator.randrange(number_of_nodes)
-        if source != target:
-            edge_set.add((source, target))
-
-    dataframe = pd.DataFrame(
-        sorted(edge_set),
-        columns=["source", "target"],
-    )
-    return dataframe.to_csv(index=False).encode("utf-8")
-
-
-def choose_query_nodes(
-    number_of_nodes: int,
-    query_count: int,
-    sampling: str,
-    seed: int,
-) -> list[int]:
-    actual_count = min(query_count, number_of_nodes)
-
-    if sampling == "Contiguous nodes":
-        return list(range(actual_count))
-
-    random_generator = random.Random(seed)
-    return sorted(
-        random_generator.sample(
-            range(number_of_nodes),
-            actual_count,
-        )
-    )
-
-
-def run_benchmark(
-    normalized_graph,
-    configuration: dict,
-    progress_bar=None,
-    status_container=None,
-) -> dict:
-    query_nodes = choose_query_nodes(
-        number_of_nodes=normalized_graph.number_of_nodes,
-        query_count=configuration["query_count"],
-        sampling=configuration["query_sampling"],
-        seed=configuration["query_seed"],
-    )
-
-    networkx_backend = NetworkXBackend()
-    ladybug_backend = LadybugBackend()
-
-    try:
-        if status_container is not None:
-            status_container.info("Testing NetworkX...")
-        if progress_bar is not None:
-            progress_bar.progress(10, text="Testing NetworkX")
-
-        networkx_results = benchmark_backend(
-            backend=networkx_backend,
-            number_of_nodes=normalized_graph.number_of_nodes,
-            edges=normalized_graph.edges,
-            query_nodes=query_nodes,
-            build_repetitions=configuration["build_repetitions"],
-            build_warmup_runs=configuration["build_warmups"],
-            query_repetitions=configuration["query_repetitions"],
-            query_warmup_runs=configuration["query_warmups"],
-        )
-
-        if status_container is not None:
-            status_container.info("NetworkX complete. Testing LadybugDB...")
-        if progress_bar is not None:
-            progress_bar.progress(48, text="Testing LadybugDB")
-
-        ladybug_results = benchmark_backend(
-            backend=ladybug_backend,
-            number_of_nodes=normalized_graph.number_of_nodes,
-            edges=normalized_graph.edges,
-            query_nodes=query_nodes,
-            build_repetitions=configuration["build_repetitions"],
-            build_warmup_runs=configuration["build_warmups"],
-            query_repetitions=configuration["query_repetitions"],
-            query_warmup_runs=configuration["query_warmups"],
-        )
-
-        if status_container is not None:
-            status_container.info(
-                "Checking that both engines returned the same answer..."
-            )
-        if progress_bar is not None:
-            progress_bar.progress(88, text="Checking correctness")
-
-        neighbors_match = (
-            networkx_results["neighbors"]["result"]
-            == ladybug_results["neighbors"]["result"]
-        )
-        nodes_match = (
-            networkx_results["number_of_nodes"]
-            == ladybug_results["number_of_nodes"]
-            == normalized_graph.number_of_nodes
-        )
-        edges_match = (
-            networkx_results["number_of_edges"]
-            == ladybug_results["number_of_edges"]
-            == len(normalized_graph.edges)
-        )
-
-        networkx_build = networkx_results["build"]["median_ms"]
-        ladybug_build = ladybug_results["build"]["median_ms"]
-        networkx_query = networkx_results["neighbors"]["median_ms"]
-        ladybug_query = ladybug_results["neighbors"]["median_ms"]
-
-        if progress_bar is not None:
-            progress_bar.progress(100, text="Benchmark complete")
-
-        return {
-            "graph_health": {
-                "nodes": normalized_graph.number_of_nodes,
-                "edges": normalized_graph.valid_rows,
-                "missing_rows": normalized_graph.missing_rows,
-                "duplicate_edges": normalized_graph.duplicate_edges,
-                "self_loops": normalized_graph.self_loops,
-            },
-            "benchmark_configuration": {
-                **configuration,
-                "actual_query_count": len(query_nodes),
-                "query_strategy": (
-                    "Adaptive range predicate"
-                    if configuration["query_sampling"] == "Contiguous nodes"
-                    else "Parameterized IN batch"
-                ),
-            },
-            "correctness": {
-                "passed": neighbors_match and nodes_match and edges_match,
-                "node_counts_match": nodes_match,
-                "edge_counts_match": edges_match,
-                "neighbor_results_match": neighbors_match,
-            },
-            "networkx": {
-                "build_median_ms": networkx_build,
-                "build_p95_ms": networkx_results["build"]["p95_ms"],
-                "query_median_ms": networkx_query,
-                "query_p95_ms": networkx_results["neighbors"]["p95_ms"],
-                "batch_throughput_per_second": networkx_results["neighbors"][
-                    "throughput_per_second"
-                ],
-            },
-            "ladybug": {
-                "build_median_ms": ladybug_build,
-                "build_p95_ms": ladybug_results["build"]["p95_ms"],
-                "query_median_ms": ladybug_query,
-                "query_p95_ms": ladybug_results["neighbors"]["p95_ms"],
-                "batch_throughput_per_second": ladybug_results["neighbors"][
-                    "throughput_per_second"
-                ],
-            },
-            "build_comparison": determine_comparison(
-                networkx_build,
-                ladybug_build,
-            ),
-            "query_comparison": determine_comparison(
-                networkx_query,
-                ladybug_query,
-            ),
-        }
-    finally:
-        networkx_backend.close()
-        ladybug_backend.close()
-
-
-def create_latency_chart(report: dict) -> None:
-    dataframe = pd.DataFrame(
-        [
-            {
-                "Operation": "Build graph",
-                "Engine": "NetworkX",
-                "Latency": report["networkx"]["build_median_ms"],
-            },
-            {
-                "Operation": "Build graph",
-                "Engine": "LadybugDB",
-                "Latency": report["ladybug"]["build_median_ms"],
-            },
-            {
-                "Operation": "Find neighbors",
-                "Engine": "NetworkX",
-                "Latency": report["networkx"]["query_median_ms"],
-            },
-            {
-                "Operation": "Find neighbors",
-                "Engine": "LadybugDB",
-                "Latency": report["ladybug"]["query_median_ms"],
-            },
-        ]
-    )
-
-    scale_name = st.radio(
-        "Chart scale",
-        ["Logarithmic", "Linear"],
-        horizontal=True,
-        key="latency_scale",
-        help="Logarithmic scale keeps very small and large values visible together.",
-    )
-    scale = alt.Scale(
-        type="log" if scale_name == "Logarithmic" else "linear",
-        zero=scale_name == "Linear",
-        nice=True,
-    )
-
-    base = alt.Chart(dataframe).encode(
-        x=alt.X("Latency:Q", title="Median time (milliseconds)", scale=scale),
-        y=alt.Y("Operation:N", title=None, sort=["Build graph", "Find neighbors"]),
-        yOffset="Engine:N",
-        color=alt.Color(
-            "Engine:N",
-            scale=alt.Scale(
-                domain=list(ENGINE_COLORS),
-                range=list(ENGINE_COLORS.values()),
-            ),
-            legend=alt.Legend(title=None, orient="top"),
-        ),
-        tooltip=[
-            "Operation:N",
-            "Engine:N",
-            alt.Tooltip("Latency:Q", format=".6f", title="Median milliseconds"),
-        ],
-    )
-
-    points = base.mark_circle(size=260)
-    labels = base.mark_text(align="left", dx=10, fontSize=12).encode(
-        text=alt.Text("Latency:Q", format=".4f")
-    )
-    st.altair_chart((points + labels).properties(height=230), width="stretch")
-
-
-def create_throughput_chart(report: dict) -> None:
-    dataframe = pd.DataFrame(
-        [
-            {
-                "Engine": "NetworkX",
-                "Batches per second": report["networkx"]["batch_throughput_per_second"],
-            },
-            {
-                "Engine": "LadybugDB",
-                "Batches per second": report["ladybug"]["batch_throughput_per_second"],
-            },
-        ]
-    )
-
-    scale_name = st.radio(
-        "Chart scale",
-        ["Logarithmic", "Linear"],
-        horizontal=True,
-        key="throughput_scale",
-        help="Use logarithmic scale when one engine's bar is too small to see.",
-    )
-    scale = alt.Scale(
-        type="log" if scale_name == "Logarithmic" else "linear",
-        zero=scale_name == "Linear",
-        nice=True,
-    )
-
-    base = alt.Chart(dataframe).encode(
-        x=alt.X(
-            "Batches per second:Q",
-            title="Estimated complete query batches per second",
-            scale=scale,
-        ),
-        y=alt.Y("Engine:N", title=None, sort=["NetworkX", "LadybugDB"]),
-        color=alt.Color(
-            "Engine:N",
-            scale=alt.Scale(
-                domain=list(ENGINE_COLORS),
-                range=list(ENGINE_COLORS.values()),
-            ),
-            legend=None,
-        ),
-        tooltip=[
-            "Engine:N",
-            alt.Tooltip("Batches per second:Q", format=",.2f"),
-        ],
-    )
-
-    points = base.mark_circle(size=280)
-    labels = base.mark_text(align="left", dx=11, fontSize=12).encode(
-        text=alt.Text("Batches per second:Q", format=",.1f")
-    )
-    st.altair_chart((points + labels).properties(height=160), width="stretch")
-
-
-def create_resource_chart(resource_report: dict) -> None:
-    dataframe = pd.DataFrame(
-        [
-            {
-                "Engine": "NetworkX",
-                "Measurement": "Memory added",
-                "Memory": resource_report["networkx"]["additional_peak_memory_mb"],
-            },
-            {
-                "Engine": "NetworkX",
-                "Measurement": "Total process peak",
-                "Memory": resource_report["networkx"]["peak_memory_mb"],
-            },
-            {
-                "Engine": "LadybugDB",
-                "Measurement": "Memory added",
-                "Memory": resource_report["ladybug"]["additional_peak_memory_mb"],
-            },
-            {
-                "Engine": "LadybugDB",
-                "Measurement": "Total process peak",
-                "Memory": resource_report["ladybug"]["peak_memory_mb"],
-            },
-        ]
-    )
-
-    chart = (
-        alt.Chart(dataframe)
-        .mark_bar(cornerRadiusTopLeft=5, cornerRadiusTopRight=5)
-        .encode(
-            x=alt.X("Engine:N", title=None),
-            xOffset="Measurement:N",
-            y=alt.Y("Memory:Q", title="Memory (MB)"),
-            color=alt.Color(
-                "Measurement:N",
-                title=None,
-                scale=alt.Scale(
-                    domain=["Memory added", "Total process peak"],
-                    range=["#60A5FA", "#F59E0B"],
-                ),
-                legend=alt.Legend(orient="top"),
-            ),
-            tooltip=[
-                "Engine:N",
-                "Measurement:N",
-                alt.Tooltip("Memory:Q", format=".2f", title="MB"),
-            ],
-        )
-        .properties(height=245)
-    )
-    st.altair_chart(chart, width="stretch")
-
-
-def create_ingestion_chart(dataframe: pd.DataFrame) -> None:
-    chart_data = dataframe[
-        [
-            "nodes",
-            "networkx_build_ms",
-            "ladybug_ready_ms",
-            "ladybug_adapter_total_ms",
-        ]
-    ].rename(
-        columns={
-            "networkx_build_ms": "NetworkX",
-            "ladybug_ready_ms": "LadybugDB native load",
-            "ladybug_adapter_total_ms": "LadybugDB including Arrow conversion",
-        }
-    )
-    chart_data = chart_data.melt(
-        id_vars=["nodes"],
-        var_name="Measurement",
-        value_name="Latency",
-    )
-
-    chart = (
-        alt.Chart(chart_data)
-        .mark_line(point=True, strokeWidth=3)
-        .encode(
-            x=alt.X(
-                "nodes:Q",
-                title="Graph size (nodes)",
-                scale=alt.Scale(type="log"),
-                axis=alt.Axis(format="~s"),
-            ),
-            y=alt.Y(
-                "Latency:Q",
-                title="Median build time (ms)",
-                scale=alt.Scale(type="log"),
-            ),
-            color=alt.Color(
-                "Measurement:N", title=None, legend=alt.Legend(orient="top")
-            ),
-            tooltip=[
-                alt.Tooltip("nodes:Q", title="Nodes", format=","),
-                "Measurement:N",
-                alt.Tooltip("Latency:Q", title="Milliseconds", format=".4f"),
-            ],
-        )
-        .properties(height=300)
-    )
-    st.altair_chart(chart, width="stretch")
-
-
-def create_query_scaling_chart(dataframe: pd.DataFrame) -> None:
-    batch_options = sorted(dataframe["batch_size"].unique().tolist())
-    selected_batch = st.select_slider(
-        "Requested nodes per query batch",
-        options=batch_options,
-        value=100 if 100 in batch_options else batch_options[0],
-    )
-
-    filtered = dataframe[dataframe["batch_size"] == selected_batch][
-        ["nodes", "networkx_warm_median_ms", "ladybug_warm_median_ms"]
-    ].rename(
-        columns={
-            "networkx_warm_median_ms": "NetworkX",
-            "ladybug_warm_median_ms": "LadybugDB",
-        }
-    )
-    chart_data = filtered.melt(
-        id_vars=["nodes"],
-        var_name="Engine",
-        value_name="Latency",
-    )
-
-    chart = (
-        alt.Chart(chart_data)
-        .mark_line(point=True, strokeWidth=3)
-        .encode(
-            x=alt.X(
-                "nodes:Q",
-                title="Graph size (nodes)",
-                scale=alt.Scale(type="log"),
-                axis=alt.Axis(format="~s"),
-            ),
-            y=alt.Y(
-                "Latency:Q",
-                title="Warm median query time (ms)",
-                scale=alt.Scale(type="log"),
-            ),
-            color=alt.Color(
-                "Engine:N",
-                title=None,
-                scale=alt.Scale(
-                    domain=list(ENGINE_COLORS),
-                    range=list(ENGINE_COLORS.values()),
-                ),
-                legend=alt.Legend(orient="top"),
-            ),
-            tooltip=[
-                alt.Tooltip("nodes:Q", title="Nodes", format=","),
-                "Engine:N",
-                alt.Tooltip("Latency:Q", title="Milliseconds", format=".6f"),
-            ],
-        )
-        .properties(height=300)
-    )
-    st.altair_chart(chart, width="stretch")
-
-
-def render_correctness_details(report: dict) -> None:
-    correctness = report["correctness"]
-    validation_columns = st.columns(3)
-    validation_columns[0].metric(
-        "Node counts",
-        "PASS" if correctness["node_counts_match"] else "FAIL",
-    )
-    validation_columns[1].metric(
-        "Edge counts",
-        "PASS" if correctness["edge_counts_match"] else "FAIL",
-    )
-    validation_columns[2].metric(
-        "Neighbor answers",
-        "PASS" if correctness["neighbor_results_match"] else "FAIL",
-    )
-
-
-def answer_graphbench_question(
-    question: str,
-    report: dict | None,
-    resource_report: dict | None,
-    normalized_graph,
-) -> str:
-    """Answer common product and benchmark questions without an external API."""
-    normalized_question = question.lower().strip()
-
-    if not normalized_question:
-        return "Ask me about the graph, correctness, winners, latency, throughput, memory, or methodology."
-
-    if any(word in normalized_question for word in ["hello", "hi", "hey"]):
-        return (
-            "Hello! I am the GraphBench Instant Guide. I explain this graph and its "
-            "benchmark results using only measured project data."
-        )
-
-    if any(
-        word in normalized_question for word in ["dataset", "graph", "nodes", "edges"]
-    ):
-        return (
-            f"The selected graph contains **{normalized_graph.number_of_nodes:,} nodes** "
-            f"and **{normalized_graph.valid_rows:,} valid directed connections**. "
-            f"GraphBench removed **{normalized_graph.missing_rows:,} incomplete rows** "
-            f"and **{normalized_graph.duplicate_edges:,} duplicate connections**."
-        )
-
-    if any(
-        word in normalized_question
-        for word in ["correct", "trust", "reliable", "valid"]
-    ):
-        if report is None:
-            return (
-                "No live performance result exists yet. Run the speed and correctness "
-                "test first. GraphBench will compare node counts, edge counts, and "
-                "neighbor answers before showing winner claims."
-            )
-
-        correctness = report["correctness"]
-        if correctness["passed"]:
-            return (
-                "**Correctness passed.** Both engines agreed on node counts, edge "
-                "counts, and neighbor results. The timing comparison is valid for this "
-                "specific graph, workload, configuration, and machine."
-            )
-
-        failed_checks = []
-        if not correctness["node_counts_match"]:
-            failed_checks.append("node counts")
-        if not correctness["edge_counts_match"]:
-            failed_checks.append("edge counts")
-        if not correctness["neighbor_results_match"]:
-            failed_checks.append("neighbor answers")
-
-        return (
-            "**Do not use this result to choose a winner.** The following checks "
-            f"failed: **{', '.join(failed_checks)}**. GraphBench intentionally hides "
-            "performance recommendations until correctness passes."
-        )
-
-    if "p95" in normalized_question or "percentile" in normalized_question:
-        return (
-            "**P95 is a slower-tail measurement.** If P95 is 10 ms, approximately "
-            "95% of measured runs completed in 10 ms or less. Comparing the median "
-            "with P95 helps reveal whether performance is stable or occasionally slow."
-        )
-
-    if "latency" in normalized_question or "time taken" in normalized_question:
-        return (
-            "**Latency is the time needed to complete one operation. Lower is better.** "
-            "GraphBench reports graph-build latency and the latency of one complete "
-            "neighbor-query batch in milliseconds."
-        )
-
-    if (
-        "throughput" in normalized_question
-        or "batches per second" in normalized_question
-    ):
-        return (
-            "**Throughput estimates how many complete query batches could finish per "
-            "second. Higher is better.** GraphBench derives it from average latency; "
-            "it is not a simultaneous multi-user load test."
-        )
-
-    if any(word in normalized_question for word in ["memory", "cpu", "resource"]):
-        if resource_report is None:
-            return (
-                "No resource report exists yet. Select **Measure memory and CPU** to "
-                "run each engine in a separate process and compare them more cleanly."
-            )
-
-        networkx_resource = resource_report["networkx"]
-        ladybug_resource = resource_report["ladybug"]
-        return (
-            "In the isolated resource test, NetworkX added approximately "
-            f"**{networkx_resource['additional_peak_memory_mb']:.2f} MB**, while "
-            "LadybugDB added approximately "
-            f"**{ladybug_resource['additional_peak_memory_mb']:.2f} MB**. CPU can "
-            "exceed 100% when native code uses multiple processor cores."
-        )
-
-    if any(
-        word in normalized_question for word in ["ingestion", "loading", "load graph"]
-    ):
-        return (
-            "The saved scalability study found a workload crossover. NetworkX won the "
-            "small 1K-node setup, while LadybugDB won optimized ingestion at 10K and "
-            "100K nodes when using sorted PyArrow tables, bulk COPY, and ANALYZE."
-        )
-
-    if any(
-        word in normalized_question
-        for word in ["random", "contiguous", "range", "strategy"]
-    ):
-        return (
-            "**Random nodes** represent general lookups and use a parameterized `IN` "
-            "batch in LadybugDB. **Contiguous nodes** form one numeric interval, so "
-            "LadybugDB can use the faster tested range predicate. Range results should "
-            "not be presented as representative of arbitrary node selection."
-        )
-
-    if any(
-        word in normalized_question
-        for word in ["why", "slow", "faster", "winner", "won"]
-    ):
-        if report is None:
-            return (
-                "Run the speed and correctness test first. Once both engines return "
-                "equivalent answers, I can explain which engine won graph setup and "
-                "neighbor lookup."
-            )
-
-        if not report["correctness"]["passed"]:
-            return (
-                "I cannot name a winner because correctness validation failed. Speed "
-                "does not matter when two engines return different answers."
-            )
-
-        build = report["build_comparison"]
-        query = report["query_comparison"]
-        return (
-            f"For this test, **{build['winner']} built the graph "
-            f"{build['speedup']:.2f}× faster**, and **{query['winner']} completed the "
-            f"neighbor workload {query['speedup']:.2f}× faster**. NetworkX benefits "
-            "from direct in-memory adjacency access. LadybugDB provides database "
-            "features and demonstrated stronger optimized bulk ingestion at larger "
-            "scales, but its arbitrary batch lookup plan performed scans and a hash join."
-        )
-
-    if any(
-        word in normalized_question for word in ["choose", "recommend", "use", "better"]
-    ):
-        if report is not None and not report["correctness"]["passed"]:
-            return (
-                "I cannot recommend an engine from this run because correctness failed. "
-                "Fix the mismatch and rerun the benchmark first."
-            )
-
-        return (
-            "Choose **NetworkX** for lightweight Python analysis and very fast direct "
-            "adjacency operations. Consider **LadybugDB** when you need persistent "
-            "graph storage, Cypher, database features, or scalable bulk ingestion. "
-            "Use the live result as evidence for your exact workload rather than "
-            "assuming one engine always wins."
-        )
-
     return (
-        "I currently answer questions about **the selected graph, correctness, winners, "
-        "latency, P95, throughput, memory, ingestion, query strategies, and engine "
-        "selection**. This built-in guide intentionally stays within verified "
-        "GraphBench information."
+        pd.DataFrame(node_rows),
+        pd.DataFrame(edge_rows),
+        pd.DataFrame(label_rows),
+        metadata,
     )
 
 
-# -----------------------------------------------------------------------------
-# Sidebar configuration
-# -----------------------------------------------------------------------------
-with st.sidebar:
-    st.title("Set up your test")
-    st.caption("Choose graph data and a repeatable workload.")
-
-    data_source = st.radio(
-        "1. Choose graph data",
-        ["Sample dataset", "Generated preset", "Upload CSV"],
+def render_graph_explorer(dataset_info: dict) -> None:
+    st.markdown("### Explore the architecture visually")
+    st.caption(
+        "The arrows follow your CSV direction: source component → dependency. "
+        "Change the lens to see how each graph algorithm interprets the same architecture."
     )
 
-    dataset_bytes = None
-    dataset_name = None
-    source_column = None
-    target_column = None
+    control_column, explanation_column = st.columns([1, 1.35])
+    with control_column:
+        lens = st.selectbox(
+            "Analysis lens",
+            [
+                "Critical dependencies",
+                "Path bottlenecks",
+                "Structural core",
+                "Dependency cycles",
+            ],
+        )
+    lens_explanations = {
+        "Critical dependencies": "Larger and brighter nodes have higher PageRank. They receive dependency importance from other important components.",
+        "Path bottlenecks": "Larger and brighter nodes have higher betweenness. They sit on more dependency paths.",
+        "Structural core": "Larger and brighter nodes belong to deeper K-core layers. Direction is ignored for this lens.",
+        "Dependency cycles": "Red nodes participate in a circular dependency. Gray nodes do not.",
+    }
+    with explanation_column:
+        st.info(lens_explanations[lens])
 
-    if data_source == "Sample dataset":
-        selected_sample = st.selectbox("Dataset", list(SAMPLE_DATASETS))
-        sample = SAMPLE_DATASETS[selected_sample]
-        sample_path = sample["path"]
-        st.caption(sample["description"])
+    edge_tuples = tuple(
+        (str(edge[0]), str(edge[1])) for edge in dataset_info.get("graph_edges", [])
+    )
+    nodes, edges, labels, metadata = build_graph_visualization(edge_tuples, lens)
 
-        if not sample_path.exists():
-            st.error(f"Missing {sample_path}. Run `python create_sample_datasets.py`.")
-            st.stop()
+    if nodes.empty:
+        st.info("No graph connections are available to visualize.")
+        return
 
-        dataset_bytes = sample_path.read_bytes()
-        dataset_name = sample_path.name
-        source_column = sample["source"]
-        target_column = sample["target"]
-        st.download_button(
-            "Download this sample",
-            dataset_bytes,
-            dataset_name,
-            "text/csv",
-            width="stretch",
+    edge_color = (
+        alt.condition(
+            "datum.cycle_edge",
+            alt.value("#EF4444"),
+            alt.value("#64748B"),
+        )
+        if lens == "Dependency cycles"
+        else alt.value("#64748B")
+    )
+
+    edge_layer = (
+        alt.Chart(edges)
+        .mark_rule(opacity=0.34, strokeWidth=1.1)
+        .encode(
+            x=alt.X("x:Q", axis=None),
+            y=alt.Y("y:Q", axis=None),
+            x2="x2:Q",
+            y2="y2:Q",
+            color=edge_color,
+            tooltip=["source:N", "target:N"],
+        )
+    )
+
+    if lens == "Dependency cycles":
+        node_color = alt.Color(
+            "cycle_status:N",
+            title=None,
+            scale=alt.Scale(
+                domain=["In dependency cycle", "Not in cycle"],
+                range=["#EF4444", "#64748B"],
+            ),
+            legend=alt.Legend(orient="top"),
+        )
+    else:
+        node_color = alt.Color(
+            "metric:Q",
+            title=metadata["metric_title"],
+            scale=alt.Scale(range=["#60A5FA", "#F59E0B"]),
+            legend=alt.Legend(orient="top"),
         )
 
-    elif data_source == "Generated preset":
-        selected_preset = st.selectbox("Graph size", list(GENERATED_PRESETS))
-        preset = GENERATED_PRESETS[selected_preset]
-        st.caption(preset["description"])
+    node_layer = (
+        alt.Chart(nodes)
+        .mark_circle(stroke="#E2E8F0", strokeWidth=0.65, opacity=0.94)
+        .encode(
+            x=alt.X("x:Q", axis=None),
+            y=alt.Y("y:Q", axis=None),
+            size=alt.Size("size:Q", scale=None, legend=None),
+            color=node_color,
+            tooltip=[
+                alt.Tooltip("node:N", title="Component"),
+                alt.Tooltip("pagerank:Q", title="PageRank", format=".6f"),
+                alt.Tooltip("betweenness:Q", title="Betweenness", format=".6f"),
+                alt.Tooltip("core:Q", title="Core number"),
+                alt.Tooltip("cycle_status:N", title="Cycle"),
+                alt.Tooltip("dependents:Q", title="Direct dependents"),
+                alt.Tooltip("dependencies:Q", title="Dependencies"),
+            ],
+        )
+    )
+
+    label_layer = (
+        alt.Chart(labels)
+        .mark_text(dy=-13, fontSize=11, color="#E2E8F0")
+        .encode(
+            x=alt.X("x:Q", axis=None),
+            y=alt.Y("y:Q", axis=None),
+            text="node:N",
+        )
+    )
+
+    graph_chart = (
+        (edge_layer + node_layer + label_layer).properties(height=590).interactive()
+    )
+    st.altair_chart(graph_chart, width="stretch")
+    st.caption(
+        "Scroll over the graph to zoom, drag to move around, and use the "
+        "chart toolbar to reset or open the graph in fullscreen."
+    )
+
+    graph_metrics = st.columns(4)
+    graph_metrics[0].metric("Visible components", f"{metadata['visible_nodes']:,}")
+    graph_metrics[1].metric("Visible dependencies", f"{metadata['visible_edges']:,}")
+    graph_metrics[2].metric("Cycle members", f"{metadata['cycle_nodes']:,}")
+    graph_metrics[3].metric("Layout", "Focused" if metadata["focused"] else "Complete")
+
+    if metadata["focused"]:
         st.caption(
-            f"Seed {preset['seed']} · {preset['nodes']:,} nodes · "
-            f"{preset['edges']:,} directed edges"
+            f"To keep the graph readable, this view focuses on the most important nodes "
+            f"and their neighbors ({metadata['visible_nodes']:,} of "
+            f"{metadata['total_nodes']:,} total components). The analysis still uses the full graph."
+        )
+    if lens == "Path bottlenecks":
+        st.caption(f"Betweenness calculation used: {metadata['betweenness_method']}.")
+
+
+def render_impact_graph(impact_report: dict, graph_edges: list[list[str]]) -> None:
+    selected_component = impact_report["component"]
+    direct_dependents = set(impact_report["direct_dependents"])
+    indirect_dependents = set(impact_report["indirect_dependents"])
+    affected_components = direct_dependents | indirect_dependents | {selected_component}
+
+    complete_graph = nx.DiGraph()
+    complete_graph.add_edges_from(
+        (str(source), str(target)) for source, target in graph_edges
+    )
+    impact_graph = complete_graph.subgraph(affected_components).copy()
+
+    if impact_graph.number_of_nodes() == 0:
+        st.info("No affected graph is available to visualize.")
+        return
+
+    positions = nx.spring_layout(impact_graph, seed=42, iterations=80)
+    node_rows = []
+
+    for node in impact_graph.nodes:
+        if node == selected_component:
+            impact_type = "Selected failure"
+            node_size = 1_100
+        elif node in direct_dependents:
+            impact_type = "Directly affected"
+            node_size = 800
+        else:
+            impact_type = "Indirectly affected"
+            node_size = 600
+
+        impact_path = impact_report["impact_paths"].get(str(node), [str(node)])
+        node_rows.append(
+            {
+                "component": str(node),
+                "x": float(positions[node][0]),
+                "y": float(positions[node][1]),
+                "impact_type": impact_type,
+                "size": node_size,
+                "impact_path": " → ".join(impact_path),
+            }
         )
 
-        with st.spinner("Preparing the reproducible graph..."):
-            dataset_bytes = generate_preset_csv(
-                number_of_nodes=preset["nodes"],
-                number_of_edges=preset["edges"],
-                seed=preset["seed"],
+    edge_rows = [
+        {
+            "source": str(source),
+            "target": str(target),
+            "x": float(positions[source][0]),
+            "y": float(positions[source][1]),
+            "x2": float(positions[target][0]),
+            "y2": float(positions[target][1]),
+        }
+        for source, target in impact_graph.edges
+    ]
+
+    node_dataframe = pd.DataFrame(node_rows)
+    edge_dataframe = pd.DataFrame(edge_rows)
+
+    if edge_dataframe.empty:
+        edge_chart = (
+            alt.Chart(pd.DataFrame({"x": [], "y": [], "x2": [], "y2": []}))
+            .mark_rule()
+            .encode(
+                x=alt.X("x:Q", axis=None),
+                y=alt.Y("y:Q", axis=None),
+                x2="x2:Q",
+                y2="y2:Q",
             )
-
-        dataset_name = (
-            f"synthetic_{preset['nodes']}_nodes_"
-            f"{preset['edges']}_edges_seed_{preset['seed']}.csv"
         )
-        source_column = "source"
-        target_column = "target"
+    else:
+        edge_chart = (
+            alt.Chart(edge_dataframe)
+            .mark_rule(color="#64748B", opacity=0.45, strokeWidth=1.4)
+            .encode(
+                x=alt.X("x:Q", axis=None),
+                y=alt.Y("y:Q", axis=None),
+                x2="x2:Q",
+                y2="y2:Q",
+                tooltip=[
+                    alt.Tooltip("source:N", title="Dependent"),
+                    alt.Tooltip("target:N", title="Dependency"),
+                ],
+            )
+        )
 
-        st.download_button(
-            "Download generated CSV",
-            dataset_bytes,
-            dataset_name,
-            "text/csv",
+    node_chart = (
+        alt.Chart(node_dataframe)
+        .mark_circle(stroke="#E2E8F0", strokeWidth=0.8, opacity=0.96)
+        .encode(
+            x=alt.X("x:Q", axis=None),
+            y=alt.Y("y:Q", axis=None),
+            size=alt.Size("size:Q", scale=None, legend=None),
+            color=alt.Color(
+                "impact_type:N",
+                title=None,
+                scale=alt.Scale(
+                    domain=[
+                        "Selected failure",
+                        "Directly affected",
+                        "Indirectly affected",
+                    ],
+                    range=["#EF4444", "#F59E0B", "#3B82F6"],
+                ),
+                legend=alt.Legend(orient="top"),
+            ),
+            tooltip=[
+                alt.Tooltip("component:N", title="Component"),
+                alt.Tooltip("impact_type:N", title="Impact"),
+                alt.Tooltip("impact_path:N", title="Dependency path"),
+            ],
+        )
+    )
+
+    label_chart = (
+        alt.Chart(node_dataframe)
+        .mark_text(dy=-16, fontSize=11, color="#E2E8F0")
+        .encode(
+            x=alt.X("x:Q", axis=None),
+            y=alt.Y("y:Q", axis=None),
+            text="component:N",
+        )
+    )
+
+    impact_chart = (
+        (edge_chart + node_chart + label_chart).properties(height=560).interactive()
+    )
+
+    st.altair_chart(impact_chart, width="stretch")
+    st.caption(
+        "Scroll over the graph to zoom, drag to move around, and use the "
+        "chart toolbar to reset or open the graph in fullscreen."
+    )
+    st.caption(
+        "Relationship direction: dependent component → dependency. Red is the "
+        "simulated failure, orange is directly affected, and blue is indirectly affected."
+    )
+
+
+def render_impact_simulator(dataset_info: dict) -> None:
+    st.markdown("### Simulate a component failure")
+    st.caption(
+        "Choose one component to see which services directly or indirectly depend on it."
+    )
+
+    graph_edges = dataset_info.get("graph_edges", [])
+    if not graph_edges:
+        st.info("Run dependency analysis again to make graph data available.")
+        return
+
+    source_column = dataset_info["source_column"]
+    target_column = dataset_info["target_column"]
+    edge_dataframe = pd.DataFrame(
+        graph_edges,
+        columns=[source_column, target_column],
+    )
+    components = sorted(
+        set(edge_dataframe[source_column]) | set(edge_dataframe[target_column])
+    )
+
+    selection_column, button_column = st.columns([2, 1])
+    selected_component = selection_column.selectbox(
+        "Component to simulate",
+        components,
+        help="GraphBench will treat this component as unavailable.",
+    )
+    run_simulation = button_column.button(
+        "Simulate failure",
+        type="primary",
+        width="stretch",
+    )
+
+    if run_simulation:
+        with st.spinner("Calculating failure impact..."):
+            impact_report = analyze_dependency_impact(
+                dataframe=edge_dataframe,
+                source_column=source_column,
+                target_column=target_column,
+                component=selected_component,
+            )
+        st.session_state["impact_report"] = impact_report
+        st.session_state["impact_component"] = selected_component
+
+    impact_report = st.session_state.get("impact_report")
+    simulated_component = st.session_state.get("impact_component")
+
+    if impact_report is None or simulated_component != selected_component:
+        st.info("Select a component and run the failure simulation.")
+        return
+
+    summary = impact_report["impact_summary"]
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Directly affected", summary["direct_dependents"])
+    metric_columns[1].metric("Indirectly affected", summary["indirect_dependents"])
+    metric_columns[2].metric(
+        "Total blast radius",
+        f"{summary['total_affected_components']} components",
+    )
+    metric_columns[3].metric(
+        "Graph affected",
+        f"{summary['blast_radius_percent']:.2f}%",
+    )
+
+    if impact_report["cycle"]["in_cycle"]:
+        cycle_members = ", ".join(impact_report["cycle"]["cycle_members"])
+        st.warning(
+            f"**{selected_component}** participates in a dependency cycle with: "
+            f"**{cycle_members}**."
+        )
+
+    blast_radius = summary["blast_radius_percent"]
+    if summary["total_affected_components"] == 0:
+        st.success(
+            "No other component depends on this component in the uploaded graph."
+        )
+    elif blast_radius >= 50:
+        st.error(
+            "High potential blast radius. More than half of the other components "
+            "could be affected."
+        )
+    elif blast_radius >= 20:
+        st.warning(
+            "Moderate potential blast radius. Review fallbacks and recovery procedures."
+        )
+    else:
+        st.info(
+            "The selected component has a relatively limited structural blast radius."
+        )
+
+    graph_tab, paths_tab, layers_tab = st.tabs(
+        ["Impact graph", "Dependency paths", "Impact layers"]
+    )
+
+    with graph_tab:
+        render_impact_graph(impact_report=impact_report, graph_edges=graph_edges)
+
+    with paths_tab:
+        path_rows = [
+            {
+                "Affected component": affected_component,
+                "Distance": len(path) - 1,
+                "Impact path": " → ".join(path),
+            }
+            for affected_component, path in impact_report["impact_paths"].items()
+        ]
+        if path_rows:
+            path_dataframe = pd.DataFrame(path_rows).sort_values(
+                ["Distance", "Affected component"]
+            )
+            st.dataframe(path_dataframe, width="stretch", hide_index=True)
+        else:
+            st.info("No dependency paths were found.")
+
+    with layers_tab:
+        if not impact_report["impact_layers"]:
+            st.info("No affected layers were found.")
+        for distance, layer_components in impact_report["impact_layers"].items():
+            layer_name = (
+                "Direct dependents"
+                if int(distance) == 1
+                else f"{distance} dependency steps away"
+            )
+            st.markdown(f"**{layer_name}**")
+            st.write(", ".join(layer_components))
+
+    st.download_button(
+        "Download impact report",
+        json.dumps(impact_report, indent=2),
+        f"impact_report_{selected_component}.json",
+        "application/json",
+        width="stretch",
+    )
+
+
+def cycle_text(cycle: Any) -> str | None:
+    if isinstance(cycle, list) and cycle:
+        return " → ".join(str(item) for item in cycle)
+    if isinstance(cycle, str) and cycle.strip():
+        return cycle.strip()
+    return None
+
+
+def initialize_state() -> None:
+    defaults = {
+        "show_setup": False,
+        "wizard_step": 1,
+        "wizard_bytes": None,
+        "wizard_name": None,
+        "wizard_source": None,
+        "wizard_target": None,
+        "dependency_report": None,
+        "dataset_info": None,
+    }
+    for key, value in defaults.items():
+        st.session_state.setdefault(key, value)
+
+
+initialize_state()
+
+
+def reset_wizard() -> None:
+    st.session_state["wizard_step"] = 1
+    st.session_state["wizard_bytes"] = None
+    st.session_state["wizard_name"] = None
+    st.session_state["wizard_source"] = None
+    st.session_state["wizard_target"] = None
+    st.session_state.pop("impact_report", None)
+    st.session_state.pop("impact_component", None)
+
+
+@st.dialog("Set up dependency analysis", width="large")
+def setup_dialog() -> None:
+    step = st.session_state["wizard_step"]
+    st.markdown(
+        f"""
+<div class="step-strip">
+    <div class="step-item {'active' if step == 1 else ''}"><strong>1. Choose data</strong>Sample or CSV upload</div>
+    <div class="step-item {'active' if step == 2 else ''}"><strong>2. Define direction</strong>Which component depends on which</div>
+    <div class="step-item {'active' if step == 3 else ''}"><strong>3. Review and run</strong>Validate before analysis</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    if step == 1:
+        st.markdown("### Choose dependency data")
+        st.caption("Each CSV row should connect one component to one dependency.")
+        source_type = st.radio(
+            "Data source",
+            ["Try the guided sample", "Upload my CSV"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+        selected_bytes = None
+        selected_name = None
+
+        if source_type == "Try the guided sample":
+            if not SAMPLE_FILE.exists():
+                st.error(f"Missing `{SAMPLE_FILE}`.")
+            else:
+                selected_bytes = SAMPLE_FILE.read_bytes()
+                selected_name = SAMPLE_FILE.name
+                st.info(
+                    "The sample represents software services and packages. It includes "
+                    "an intentional dependency cycle so you can see how GraphBench explains risk."
+                )
+                st.dataframe(
+                    pd.read_csv(io.BytesIO(selected_bytes)).head(8),
+                    width="stretch",
+                    hide_index=True,
+                )
+        else:
+            uploaded = st.file_uploader(
+                "Dependency edge-list CSV",
+                type=["csv"],
+                help="The file needs at least two columns and one data row.",
+            )
+            if uploaded is not None:
+                selected_bytes = uploaded.getvalue()
+                selected_name = uploaded.name
+                try:
+                    uploaded_frame = pd.read_csv(io.BytesIO(selected_bytes))
+                    st.dataframe(
+                        uploaded_frame.head(8), width="stretch", hide_index=True
+                    )
+                except Exception as error:
+                    st.error(f"Could not read this CSV: {error}")
+                    selected_bytes = None
+
+        if st.button(
+            "Continue to relationship direction",
+            type="primary",
             width="stretch",
+            disabled=selected_bytes is None,
+        ):
+            st.session_state["wizard_bytes"] = selected_bytes
+            st.session_state["wizard_name"] = selected_name
+            st.session_state["wizard_step"] = 2
+            st.rerun()
+
+    elif step == 2:
+        try:
+            frame = pd.read_csv(io.BytesIO(st.session_state["wizard_bytes"]))
+        except Exception as error:
+            st.error(f"Could not read the selected CSV: {error}")
+            if st.button("Return to data selection"):
+                reset_wizard()
+                st.rerun()
+            return
+
+        columns = list(frame.columns)
+        st.markdown("### Tell us what one row means")
+        st.caption("This direction changes how every result is interpreted.")
+
+        default_source = columns.index("component") if "component" in columns else 0
+        default_target = (
+            columns.index("depends_on")
+            if "depends_on" in columns
+            else min(1, len(columns) - 1)
+        )
+        source_column = st.selectbox(
+            "Component column",
+            columns,
+            index=default_source,
+            help="The component that has the dependency.",
+        )
+        target_column = st.selectbox(
+            "Dependency column",
+            columns,
+            index=default_target,
+            help="The component being depended upon.",
         )
 
-        if preset["nodes"] >= 100_000:
-            st.warning(
-                "This large test can take several minutes and may exceed free cloud limits."
+        if source_column == target_column:
+            st.error("Choose two different columns.")
+        else:
+            st.info(
+                f"**{source_column} → {target_column}** means: each value in "
+                f"`{source_column}` depends on the value in `{target_column}`."
+            )
+            confirmed = st.checkbox(
+                "Yes, this relationship direction is correct",
+                help="For example, api_gateway → logging means api_gateway depends on logging.",
             )
 
+            back_column, next_column = st.columns([1, 2])
+            if back_column.button("Back", width="stretch"):
+                st.session_state["wizard_step"] = 1
+                st.rerun()
+            if next_column.button(
+                "Review graph",
+                type="primary",
+                width="stretch",
+                disabled=not confirmed,
+            ):
+                st.session_state["wizard_source"] = source_column
+                st.session_state["wizard_target"] = target_column
+                st.session_state["wizard_step"] = 3
+                st.rerun()
+
     else:
-        uploaded_file = st.file_uploader(
-            "Edge-list CSV",
-            type=["csv"],
-            help="Each row should connect one source value to one target value.",
-        )
-        if uploaded_file is None:
-            st.info("Upload a CSV to begin.")
-            st.stop()
+        frame = pd.read_csv(io.BytesIO(st.session_state["wizard_bytes"]))
+        source_column = st.session_state["wizard_source"]
+        target_column = st.session_state["wizard_target"]
 
-        dataset_bytes = uploaded_file.getvalue()
-        dataset_name = uploaded_file.name
+        try:
+            normalized = load_edge_csv(
+                file_path=io.BytesIO(st.session_state["wizard_bytes"]),
+                source_column=source_column,
+                target_column=target_column,
+            )
+        except Exception as error:
+            st.error(f"Could not prepare this graph: {error}")
+            return
 
-    try:
-        preview_dataframe = pd.read_csv(io.BytesIO(dataset_bytes))
-    except Exception as error:
-        st.error(f"Could not read the CSV: {error}")
-        st.stop()
+        st.markdown("### Review before analysis")
+        metric_columns = st.columns(4)
+        metric_columns[0].metric("Components", f"{normalized.number_of_nodes:,}")
+        metric_columns[1].metric("Dependencies", f"{normalized.valid_rows:,}")
+        metric_columns[2].metric("Missing rows", f"{normalized.missing_rows:,}")
+        metric_columns[3].metric("Duplicates", f"{normalized.duplicate_edges:,}")
 
-    if preview_dataframe.empty or len(preview_dataframe.columns) < 2:
-        st.error("The CSV needs at least two columns and one data row.")
-        st.stop()
-
-    columns = list(preview_dataframe.columns)
-    if data_source == "Upload CSV":
-        source_column = st.selectbox("Starts at", columns, index=0)
-        target_column = st.selectbox(
-            "Points to",
-            columns,
-            index=1 if len(columns) > 1 else 0,
+        st.caption(
+            f"Meaning: `{source_column} → {target_column}` · File: "
+            f"`{st.session_state['wizard_name']}`"
         )
 
-    if source_column == target_column:
-        st.error("The starting and destination columns must be different.")
-        st.stop()
+        too_large = normalized.number_of_nodes > MAX_ANALYSIS_NODES
+        if too_large:
+            st.error(
+                f"This version supports up to {MAX_ANALYSIS_NODES:,} components for "
+                "dependency intelligence. Your graph has "
+                f"{normalized.number_of_nodes:,}."
+            )
 
-    st.divider()
-    st.markdown("#### 2. Choose the lookup pattern")
-    query_sampling = st.radio(
-        "Nodes to look up",
-        ["Random nodes", "Contiguous nodes"],
-        help=(
-            "Random nodes represent general lookups. Contiguous nodes allow LadybugDB "
-            "to use its tested range-query optimization."
-        ),
-    )
-    query_seed = st.number_input(
-        "Query seed",
-        min_value=0,
-        max_value=2_147_483_647,
-        value=42,
-        help="The same seed selects the same random nodes on repeated runs.",
-    )
+        back_column, run_column = st.columns([1, 2])
+        if back_column.button("Back", width="stretch"):
+            st.session_state["wizard_step"] = 2
+            st.rerun()
 
-    st.divider()
-    st.markdown("#### 3. Choose test depth")
-    benchmark_mode = st.radio(
-        "Benchmark mode",
-        ["Quick", "Advanced"],
-        horizontal=True,
-    )
+        if run_column.button(
+            "Analyze dependency architecture",
+            type="primary",
+            width="stretch",
+            disabled=too_large,
+        ):
+            progress = st.progress(10, text="Validating dependency data...")
+            try:
+                progress.progress(35, text="Detecting cycles and graph structure...")
+                report = generate_dependency_intelligence_report(
+                    dataframe=frame,
+                    source_column=source_column,
+                    target_column=target_column,
+                    top_n=10,
+                    pagerank_alpha=0.85,
+                    exact_betweenness_threshold=2_000,
+                    approximation_samples=500,
+                    seed=42,
+                )
+                progress.progress(85, text="Preparing explainable findings...")
 
-    if benchmark_mode == "Quick":
-        configuration = {
-            "mode": "Quick",
-            "query_count": 100,
-            "build_repetitions": 5,
-            "build_warmups": 1,
-            "query_repetitions": 20,
-            "query_warmups": 3,
-            "query_sampling": query_sampling,
-            "query_seed": int(query_seed),
-        }
-        st.caption("5 builds and 20 query batches. Best for first-time visitors.")
-    else:
-        with st.expander("Advanced settings", expanded=True):
-            query_count = st.number_input("Nodes per query batch", 1, 1_000_000, 100)
-            build_repetitions = st.number_input("Build repetitions", 1, 50, 5)
-            build_warmups = st.number_input("Build warm-ups", 0, 10, 1)
-            query_repetitions = st.number_input("Query repetitions", 1, 1_000, 50)
-            query_warmups = st.number_input("Query warm-ups", 0, 100, 5)
+                dataset_hash = hashlib.sha256(
+                    st.session_state["wizard_bytes"]
+                ).hexdigest()
+                report["dataset"] = {
+                    "name": st.session_state["wizard_name"],
+                    "source_column": source_column,
+                    "target_column": target_column,
+                    "sha256": dataset_hash,
+                }
+                report["environment"] = collect_environment_metadata()
 
-        configuration = {
-            "mode": "Advanced",
-            "query_count": int(query_count),
-            "build_repetitions": int(build_repetitions),
-            "build_warmups": int(build_warmups),
-            "query_repetitions": int(query_repetitions),
-            "query_warmups": int(query_warmups),
-            "query_sampling": query_sampling,
-            "query_seed": int(query_seed),
-        }
-
-
-try:
-    normalized_graph = load_edge_csv(
-        file_path=io.BytesIO(dataset_bytes),
-        source_column=source_column,
-        target_column=target_column,
-    )
-except Exception as error:
-    st.error(f"Could not prepare the graph: {error}")
-    st.stop()
-
-if normalized_graph.number_of_nodes == 0:
-    st.error("No valid graph data remained after validation.")
-    st.stop()
-
-configuration["query_count"] = min(
-    configuration["query_count"],
-    normalized_graph.number_of_nodes,
-)
-
-dataset_hash = hashlib.sha256(dataset_bytes).hexdigest()
-dataset_key = (dataset_hash, source_column, target_column)
-benchmark_key = (*dataset_key, json.dumps(configuration, sort_keys=True))
-
-if st.session_state.get("active_dataset_key") != dataset_key:
-    st.session_state.pop("benchmark_report", None)
-    st.session_state.pop("resource_report", None)
-    st.session_state.pop("guide_messages", None)
-    st.session_state.pop("quick_guide_answer", None)
-    st.session_state.pop("quick_guide_last_question", None)
-    st.session_state["active_dataset_key"] = dataset_key
-
-if st.session_state.get("active_benchmark_key") != benchmark_key:
-    st.session_state.pop("benchmark_report", None)
-    st.session_state.pop("guide_messages", None)
-    st.session_state.pop("quick_guide_answer", None)
-    st.session_state.pop("quick_guide_last_question", None)
-    st.session_state["active_benchmark_key"] = benchmark_key
+                st.session_state["dependency_report"] = report
+                clean_edge_frame = (
+                    frame[[source_column, target_column]]
+                    .dropna()
+                    .drop_duplicates()
+                    .astype(str)
+                )
+                st.session_state["dataset_info"] = {
+                    "name": st.session_state["wizard_name"],
+                    "source_column": source_column,
+                    "target_column": target_column,
+                    "nodes": normalized.number_of_nodes,
+                    "edges": normalized.valid_rows,
+                    "missing": normalized.missing_rows,
+                    "duplicates": normalized.duplicate_edges,
+                    "self_loops": normalized.self_loops,
+                    "preview": frame.head(20).to_dict(orient="records"),
+                    "graph_edges": clean_edge_frame.values.tolist(),
+                }
+                progress.progress(100, text="Analysis complete")
+                st.session_state["show_setup"] = False
+                st.rerun()
+            except nx.PowerIterationFailedConvergence:
+                st.error(
+                    "PageRank did not converge. Review the graph's cycles and try again."
+                )
+            except Exception as error:
+                st.error(f"Dependency analysis failed: {error}")
 
 
-# -----------------------------------------------------------------------------
-# Main page
-# -----------------------------------------------------------------------------
 st.markdown(
     """
 <div class="hero">
-    <div>
-        <div class="hero-kicker">Graph engine decision lab</div>
-        <h1 class="hero-title">GraphBench</h1>
-        <p class="hero-description">
-            Upload or generate a graph, run the same work in NetworkX and LadybugDB,
-            verify that both return the same answer, and see where each engine performs best.
-        </p>
-    </div>
-    <div class="hero-badge">Open-source learning project</div>
+    <div class="eyebrow">Software dependency intelligence</div>
+    <h1>GraphBench</h1>
+    <p>
+        Upload a software dependency graph and discover critical dependencies,
+        architectural bottlenecks, circular dependencies, and structural cores—
+        with plain-language evidence and recommended next actions.
+    </p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    """
-<div class="trust-strip">
-    <div class="trust-item">
-        <div class="trust-label">Same input</div>
-        <div class="trust-value">Both engines receive one normalized graph</div>
-    </div>
-    <div class="trust-item">
-        <div class="trust-label">Correctness first</div>
-        <div class="trust-value">Speed claims appear only after answers match</div>
-    </div>
-    <div class="trust-item">
-        <div class="trust-label">Reproducible</div>
-        <div class="trust-value">Seeds, settings, versions, and dataset hash are recorded</div>
-    </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
 
-health_columns = st.columns(5)
-health_columns[0].metric("Nodes", f"{normalized_graph.number_of_nodes:,}")
-health_columns[1].metric("Connections", f"{normalized_graph.valid_rows:,}")
-health_columns[2].metric("Rows removed", f"{normalized_graph.missing_rows:,}")
-health_columns[3].metric("Duplicates removed", f"{normalized_graph.duplicate_edges:,}")
-health_columns[4].metric("Self-connections", f"{normalized_graph.self_loops:,}")
-
-action_one, action_two, action_three = st.columns([1.25, 1, 0.72])
-run_performance = action_one.button(
-    "Run speed and correctness test",
-    type="primary",
-    width="stretch",
-)
-run_resources = action_two.button(
-    "Measure memory and CPU",
-    width="stretch",
-    help="Runs each engine separately for a cleaner resource comparison.",
-)
-
-assistant_button_label = (
-    "Close assistant"
-    if st.session_state.get("show_quick_guide", False)
-    else "Ask GraphBench"
-)
-toggle_quick_guide = action_three.button(
-    assistant_button_label,
-    key="toggle_quick_guide",
-    width="stretch",
-    help="Open a plain-language guide beside the benchmark controls.",
-)
-
-if toggle_quick_guide:
-    st.session_state["show_quick_guide"] = not st.session_state.get(
-        "show_quick_guide",
-        False,
-    )
-
-if st.session_state.get("show_quick_guide", False):
-    with st.container(border=True):
-        guide_heading, guide_note = st.columns([1, 1.4])
-        guide_heading.markdown("#### Ask GraphBench")
-        guide_note.caption(
-            "Instant explanations · No API key · Grounded in the current GraphBench data"
-        )
-
-        with st.form(
-            "quick_guide_form",
-            clear_on_submit=False,
-        ):
-            question_column, custom_column = st.columns(2)
-            quick_suggestion = question_column.selectbox(
-                "Common question",
-                [
-                    "Choose a question",
-                    "Which engine won and why?",
-                    "Can I trust this result?",
-                    "What does P95 mean?",
-                    "Which engine should I use?",
-                    "Why is LadybugDB slower for neighbor lookup?",
-                ],
-                key="quick_guide_suggestion",
-            )
-            custom_question = custom_column.text_input(
-                "Or type your own question",
-                key="quick_guide_question",
-                placeholder="Example: What does throughput mean?",
-            )
-
-            suggestion_button, custom_button = st.columns(2)
-            explain_suggestion = suggestion_button.form_submit_button(
-                "Explain selected question",
-                type="primary",
-                width="stretch",
-            )
-            ask_custom_question = custom_button.form_submit_button(
-                "Ask my question",
-                width="stretch",
-            )
-
-        if explain_suggestion or ask_custom_question:
-            if explain_suggestion:
-                quick_prompt = (
-                    quick_suggestion if quick_suggestion != "Choose a question" else ""
-                )
-            else:
-                quick_prompt = custom_question.strip()
-
-            if not quick_prompt:
-                if explain_suggestion:
-                    st.warning("Choose a common question first.")
-                else:
-                    st.warning("Type a question before selecting Ask my question.")
-            else:
-                quick_answer = answer_graphbench_question(
-                    question=quick_prompt,
-                    report=st.session_state.get("benchmark_report"),
-                    resource_report=st.session_state.get("resource_report"),
-                    normalized_graph=normalized_graph,
-                )
-                st.session_state["quick_guide_answer"] = quick_answer
-                st.session_state["quick_guide_last_question"] = quick_prompt
-
-                if "guide_messages" not in st.session_state:
-                    st.session_state["guide_messages"] = []
-                st.session_state["guide_messages"].append(
-                    {"role": "user", "content": quick_prompt}
-                )
-                st.session_state["guide_messages"].append(
-                    {"role": "assistant", "content": quick_answer}
-                )
-
-        if st.session_state.get("quick_guide_answer"):
-            st.divider()
-            with st.chat_message("user"):
-                st.markdown(
-                    st.session_state.get("quick_guide_last_question", "Question")
-                )
-            with st.chat_message("assistant"):
-                st.markdown(st.session_state["quick_guide_answer"])
-            st.caption("Continue the conversation in the Ask GraphBench tab.")
-
-status_container = st.empty()
-progress_container = st.empty()
-
-if run_performance:
-    with progress_container.container():
-        benchmark_progress = st.progress(0, text="Starting benchmark...")
-
-    try:
-        report = run_benchmark(
-            normalized_graph,
-            configuration,
-            benchmark_progress,
-            status_container,
-        )
-        report["dataset"] = {
-            "name": dataset_name,
-            "source_column": source_column,
-            "target_column": target_column,
-            "sha256": dataset_hash,
-        }
-        report["environment"] = collect_environment_metadata()
-        st.session_state["benchmark_report"] = report
-        status_container.success("Benchmark complete. Review the summary below.")
-        progress_container.empty()
-    except Exception as error:
-        progress_container.empty()
-        status_container.error(f"Benchmark failed: {error}")
-
-if run_resources:
-    with progress_container.container():
-        resource_progress = st.progress(0, text="Preparing resource measurement...")
-
-    def update_resource_progress(percentage: int, message: str) -> None:
-        resource_progress.progress(percentage, text=message)
-        status_container.info(message)
-
-    try:
-        resource_report = compare_graph_resources(
-            number_of_nodes=normalized_graph.number_of_nodes,
-            edges=normalized_graph.edges,
-            progress_callback=update_resource_progress,
-        )
-        resource_report["dataset"] = {
-            "name": dataset_name,
-            "source_column": source_column,
-            "target_column": target_column,
-            "sha256": dataset_hash,
-        }
-        resource_report["environment"] = collect_environment_metadata()
-        st.session_state["resource_report"] = resource_report
-        status_container.success("Resource measurement complete.")
-        progress_container.empty()
-    except Exception as error:
-        progress_container.empty()
-        status_container.error(f"Resource measurement failed: {error}")
+report = st.session_state.get("dependency_report")
+dataset_info = st.session_state.get("dataset_info")
 
 
-report = st.session_state.get("benchmark_report")
-resource_report = st.session_state.get("resource_report")
-
-workspace_tabs = st.tabs(
-    [
-        "Overview",
-        "Ask GraphBench",
-        "Performance",
-        "Scaling research",
-        "Resources",
-        "Your data",
-        "About",
-    ]
-)
-
-
-with workspace_tabs[0]:
-    if report is None:
-        st.subheader("Ready when you are")
-        st.markdown(
-            '<p class="section-intro">Choose data and settings in the sidebar, then run the speed and correctness test.</p>',
-            unsafe_allow_html=True,
-        )
-        getting_started = st.columns(3)
-        getting_started[0].info("1. Choose a sample, generated graph, or your own CSV.")
-        getting_started[1].info("2. Select random or contiguous node lookups.")
-        getting_started[2].info("3. Run the test and compare verified results.")
-    else:
-        correctness = report["correctness"]
-        configuration_report = report["benchmark_configuration"]
-
-        if correctness["passed"]:
-            st.success("Trusted result: both engines returned equivalent answers.")
-            build = report["build_comparison"]
-            query = report["query_comparison"]
-
-            st.subheader("The short answer")
-            result_columns = st.columns(2)
-            result_columns[0].metric(
-                "Faster graph setup",
-                build["winner"],
-                f"{build['speedup']:.2f}× faster",
-            )
-            result_columns[1].metric(
-                "Faster neighbor lookup",
-                query["winner"],
-                f"{query['speedup']:.2f}× faster",
-            )
-
-            st.info(
-                "A winner applies only to this graph and workload. NetworkX is an "
-                "in-memory analysis library; LadybugDB adds persistent storage, Cypher, "
-                "and database-oriented analytical capabilities."
-            )
-
-            context_columns = st.columns(4)
-            context_columns[0].metric(
-                "Graph", f"{report['graph_health']['nodes']:,} nodes"
-            )
-            context_columns[1].metric(
-                "Lookup batch",
-                f"{configuration_report['actual_query_count']:,} nodes",
-            )
-            context_columns[2].metric(
-                "Lookup selection",
-                configuration_report["query_sampling"].replace(" nodes", ""),
-            )
-            context_columns[3].metric(
-                "Ladybug strategy",
-                configuration_report["query_strategy"],
-            )
-        else:
-            st.error(
-                "Results are not comparable because the engines returned different answers."
-            )
-            st.warning(
-                "Timings are retained only for debugging. GraphBench hides winner claims until all checks pass."
-            )
-            render_correctness_details(report)
-
-
-with workspace_tabs[1]:
-    st.subheader("Ask GraphBench")
+if report is None:
     st.markdown(
-        '<p class="section-intro">Get plain-language answers grounded in the selected graph, live benchmark, and verified project findings.</p>',
+        """
+<div class="empty-state">
+    <div class="eyebrow">Three guided steps</div>
+    <h2>Understand the hidden risk in your dependency graph</h2>
+    <p>
+        Start with our sample or upload a two-column CSV. GraphBench will guide you
+        through relationship direction, validation, analysis, and interpretation.
+    </p>
+</div>
+""",
         unsafe_allow_html=True,
     )
-
-    st.caption(
-        "Instant Guide · No API key · No external AI service · Answers stay within GraphBench evidence"
-    )
-
-    if "guide_messages" not in st.session_state:
-        st.session_state["guide_messages"] = [
-            {
-                "role": "assistant",
-                "content": (
-                    "Welcome! I can explain which engine won, whether the result is "
-                    "trustworthy, what the metrics mean, and which engine may fit your use case."
-                ),
-            }
-        ]
-
-    st.markdown("#### Suggested questions")
-    suggestion_columns = st.columns(4)
-    suggestions = [
-        "Which engine won and why?",
-        "Can I trust this result?",
-        "What does P95 mean?",
-        "Which engine should I use?",
-    ]
-    selected_prompt = None
-
-    for index, suggestion in enumerate(suggestions):
-        if suggestion_columns[index].button(
-            suggestion,
-            key=f"guide_suggestion_{index}",
-            width="stretch",
-        ):
-            selected_prompt = suggestion
-
-    st.divider()
-
-    for message in st.session_state["guide_messages"]:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    typed_prompt = st.chat_input(
-        "Ask about this graph or its benchmark results...",
-        key="graphbench_guide_input",
-    )
-    prompt = selected_prompt or typed_prompt
-
-    if prompt:
-        answer = answer_graphbench_question(
-            question=prompt,
-            report=report,
-            resource_report=resource_report,
-            normalized_graph=normalized_graph,
-        )
-        st.session_state["guide_messages"].append({"role": "user", "content": prompt})
-        st.session_state["guide_messages"].append(
-            {"role": "assistant", "content": answer}
-        )
+    button_columns = st.columns([1, 1.2, 1])
+    if button_columns[1].button(
+        "Start dependency analysis",
+        type="primary",
+        width="stretch",
+    ):
+        reset_wizard()
+        st.session_state["show_setup"] = True
         st.rerun()
 
+    st.markdown("### What you will receive")
+    benefit_columns = st.columns(4)
+    benefits = [
+        (
+            "Critical dependencies",
+            "Find components that receive importance from many dependency paths.",
+        ),
+        (
+            "Path bottlenecks",
+            "Identify connectors where change or failure may affect multiple areas.",
+        ),
+        (
+            "Dependency cycles",
+            "Expose circular relationships that complicate builds and deployments.",
+        ),
+        (
+            "Structural core",
+            "Locate the tightly connected layer that deserves careful change control.",
+        ),
+    ]
+    for column, (title, description) in zip(benefit_columns, benefits):
+        with column:
+            st.markdown(
+                f'<div class="summary-card"><div class="label">Analysis output</div><h3>{title}</h3><p>{description}</p></div>',
+                unsafe_allow_html=True,
+            )
 
-with workspace_tabs[2]:
-    st.subheader("Performance details")
-    st.markdown(
-        '<p class="section-intro">Latency means time taken; lower is better. Throughput means completed batches per second; higher is better.</p>',
-        unsafe_allow_html=True,
+else:
+    summary = summarize_report(report)
+    cycle = cycle_text(summary["cycle"])
+    candidates = summary["candidates"]
+
+    title_column, action_column = st.columns([3, 1])
+    with title_column:
+        st.subheader("Architecture review")
+        st.caption(
+            f"{dataset_info['name']} · {dataset_info['nodes']:,} components · "
+            f"{dataset_info['edges']:,} dependencies · "
+            f"{dataset_info['source_column']} → {dataset_info['target_column']}"
+        )
+    with action_column:
+        if st.button("Analyze another graph", width="stretch"):
+            reset_wizard()
+            st.session_state["show_setup"] = True
+            st.rerun()
+
+    if cycle:
+        st.warning(
+            f"**Review recommended:** circular dependency detected: {cycle}. "
+            "Cycles can complicate build order, deployment order, and failure analysis."
+        )
+    else:
+        st.success("No circular dependency was detected.")
+
+    graph_tab, impact_tab, findings_tab, actions_tab, evidence_tab = st.tabs(
+        [
+            "Graph explorer",
+            "Impact simulator",
+            "Key findings",
+            "Recommended actions",
+            "Evidence & method",
+        ]
     )
 
-    if report is None:
-        st.info("Run the speed and correctness test to see performance results.")
-    elif not report["correctness"]["passed"]:
-        st.warning(
-            "Performance charts are hidden because correctness validation failed."
-        )
-        render_correctness_details(report)
-    else:
-        latency_tab, throughput_tab, table_tab = st.tabs(
-            ["Time taken", "Work completed", "Exact numbers"]
-        )
+    with graph_tab:
+        render_graph_explorer(dataset_info)
 
-        with latency_tab:
-            create_latency_chart(report)
-            st.caption(
-                "Lower values are better. P95 represents a slower result near the tail of repeated runs."
+    with impact_tab:
+        render_impact_simulator(dataset_info)
+
+    with findings_tab:
+        finding_columns = st.columns(3)
+        with finding_columns[0]:
+            st.markdown(
+                f'<div class="summary-card"><div class="label">Critical dependency</div><h3>{summary["highest_component"]}</h3><p>PageRank {summary["highest_score"]:.6f}. Review reliability, ownership, and fallback coverage.</p></div>',
+                unsafe_allow_html=True,
+            )
+        with finding_columns[1]:
+            st.markdown(
+                f'<div class="summary-card"><div class="label">Path bottleneck</div><h3>{summary["bottleneck_component"]}</h3><p>Betweenness {summary["bottleneck_score"]:.6f}. It connects important dependency paths.</p></div>',
+                unsafe_allow_html=True,
+            )
+        with finding_columns[2]:
+            st.markdown(
+                f'<div class="summary-card"><div class="label">Structural core</div><h3>{summary["maximum_core"]}-core</h3><p>{summary["deepest_size"]} components belong to the deepest connected layer.</p></div>',
+                unsafe_allow_html=True,
             )
 
-        with throughput_tab:
-            create_throughput_chart(report)
-            st.caption(
-                "Estimated throughput is calculated from average batch latency; it is not a concurrent multi-user load test."
-            )
+        st.markdown("### Components to review first")
+        st.caption(
+            "A higher signal count means several independent graph measures point to the same component. It does not prove a defect."
+        )
 
-        with table_tab:
+        if not candidates:
+            st.info("The report did not return ranked review candidates.")
+        else:
+            normalized_candidates = []
+            for index, candidate in enumerate(candidates, start=1):
+                reasons = candidate_value(candidate, "reasons", "signals", default=[])
+                cautions = candidate_value(
+                    candidate, "cautions", "warnings", default=[]
+                )
+                normalized_candidates.append(
+                    {
+                        "Rank": int(candidate_value(candidate, "rank", default=index)),
+                        "Component": str(
+                            candidate_value(
+                                candidate, "component", "name", default="Unknown"
+                            )
+                        ),
+                        "Signals": int(
+                            candidate_value(
+                                candidate,
+                                "signal_count",
+                                "signals_count",
+                                default=len(reasons),
+                            )
+                        ),
+                        "PageRank": number(
+                            candidate_value(
+                                candidate, "pagerank", "pagerank_score", default=0
+                            )
+                        ),
+                        "Betweenness": number(
+                            candidate_value(
+                                candidate, "betweenness", "betweenness_score", default=0
+                            )
+                        ),
+                        "Core": int(
+                            number(
+                                candidate_value(
+                                    candidate, "core_number", "core", default=0
+                                )
+                            )
+                        ),
+                        "In cycle": bool(
+                            candidate_value(
+                                candidate, "in_cycle", "cycle_member", default=False
+                            )
+                        ),
+                        "Reasons": reasons,
+                        "Cautions": cautions,
+                    }
+                )
+
+            candidate_frame = pd.DataFrame(normalized_candidates)
+            chart = (
+                alt.Chart(candidate_frame.head(10))
+                .mark_bar(cornerRadiusEnd=5)
+                .encode(
+                    x=alt.X("Signals:Q", title="Independent structural signals"),
+                    y=alt.Y("Component:N", title=None, sort="-x"),
+                    color=alt.Color(
+                        "Signals:Q",
+                        scale=alt.Scale(range=["#60A5FA", "#F59E0B"]),
+                        legend=None,
+                    ),
+                    tooltip=["Component:N", "Signals:Q", "PageRank:Q", "Betweenness:Q"],
+                )
+                .properties(height=300)
+            )
+            st.altair_chart(chart, width="stretch")
+
+            selected_name = st.selectbox(
+                "Explain a review candidate",
+                candidate_frame["Component"].tolist(),
+            )
+            selected = next(
+                item
+                for item in normalized_candidates
+                if item["Component"] == selected_name
+            )
+            explanation_columns = st.columns(2)
+            with explanation_columns[0]:
+                st.markdown("**Why GraphBench flagged it**")
+                if selected["Reasons"]:
+                    for reason in selected["Reasons"]:
+                        st.write(f"- {reason}")
+                else:
+                    st.write(
+                        "Multiple structural measurements place it among the top review candidates."
+                    )
+            with explanation_columns[1]:
+                st.markdown("**Interpretation caution**")
+                if selected["Cautions"]:
+                    for caution in selected["Cautions"]:
+                        st.write(f"- {caution}")
+                else:
+                    st.write(
+                        "This is a review priority, not proof that the component is defective."
+                    )
+
             st.dataframe(
-                pd.DataFrame(
-                    [
-                        {
-                            "Engine": "NetworkX",
-                            "Build median (ms)": report["networkx"]["build_median_ms"],
-                            "Build P95 (ms)": report["networkx"]["build_p95_ms"],
-                            "Query median (ms)": report["networkx"]["query_median_ms"],
-                            "Query P95 (ms)": report["networkx"]["query_p95_ms"],
-                            "Batches/second": report["networkx"][
-                                "batch_throughput_per_second"
-                            ],
-                        },
-                        {
-                            "Engine": "LadybugDB",
-                            "Build median (ms)": report["ladybug"]["build_median_ms"],
-                            "Build P95 (ms)": report["ladybug"]["build_p95_ms"],
-                            "Query median (ms)": report["ladybug"]["query_median_ms"],
-                            "Query P95 (ms)": report["ladybug"]["query_p95_ms"],
-                            "Batches/second": report["ladybug"][
-                                "batch_throughput_per_second"
-                            ],
-                        },
-                    ]
-                ),
+                candidate_frame.drop(columns=["Reasons", "Cautions"]),
                 width="stretch",
                 hide_index=True,
             )
 
-
-with workspace_tabs[3]:
-    st.subheader("Saved scaling research")
-    st.markdown(
-        '<p class="section-intro">These are precomputed development-machine experiments, not results from the graph currently selected in the sidebar.</p>',
-        unsafe_allow_html=True,
-    )
-
-    show_saved_research = st.toggle(
-        "Show saved research results",
-        value=False,
-        help="Open previously generated ingestion and query scalability studies.",
-    )
-
-    if not show_saved_research:
-        research_columns = st.columns(3)
-        research_columns[0].metric("Small graph", "1K nodes", "NetworkX setup wins")
-        research_columns[1].metric("Crossover", "10K nodes", "LadybugDB ingestion wins")
-        research_columns[2].metric(
-            "Large graph", "100K nodes", "LadybugDB ingestion scales"
-        )
-        st.info(
-            "The research found different winners for different jobs: LadybugDB scaled better for optimized bulk ingestion, while NetworkX remained faster for direct neighbor lookup."
-        )
-    else:
-        ingestion_tab, query_tab, strategy_tab = st.tabs(
-            ["Graph ingestion", "Neighbor lookup", "Query strategies"]
-        )
-
-        with ingestion_tab:
-            st.markdown("#### How graph setup scales")
-            st.write(
-                "LadybugDB uses sorted PyArrow tables, bulk COPY, and ANALYZE. Native load excludes Arrow conversion; adapter-inclusive load includes it."
-            )
-
-            if not INGESTION_RESULTS_FILE.exists():
-                st.info(
-                    "Run `python run_ingestion_scalability.py` to create these results."
-                )
-            else:
-                ingestion_results = pd.read_csv(INGESTION_RESULTS_FILE)
-                create_ingestion_chart(ingestion_results)
-                st.dataframe(ingestion_results, width="stretch", hide_index=True)
-                st.success(
-                    "Observed result: NetworkX won the 1K-node setup, while LadybugDB won optimized ingestion at 10K and 100K nodes."
-                )
-
-        with query_tab:
-            st.markdown("#### How neighbor lookup scales")
-            st.write(
-                "Random node batches test a general lookup pattern. Lower latency is better. The logarithmic chart keeps both engines visible."
-            )
-
-            if not QUERY_RESULTS_FILE.exists():
-                st.info(
-                    "Run `python run_query_scalability.py` to create these results."
-                )
-            else:
-                query_results = pd.read_csv(QUERY_RESULTS_FILE)
-                create_query_scaling_chart(query_results)
-                st.dataframe(query_results, width="stretch", hide_index=True)
-                st.info(
-                    "Observed result: batching reduced LadybugDB's cost per requested node, but NetworkX remained faster for direct adjacency lookup."
-                )
-
-        with strategy_tab:
-            st.markdown("#### LadybugDB query-strategy experiment")
-            st.write(
-                "This test compared equivalent Cypher approaches for a contiguous 100-node batch on a 100K-node graph."
-            )
-
-            if not QUERY_STRATEGY_RESULTS_FILE.exists():
-                st.info(
-                    "Run `python compare_query_strategies.py` to create these results."
-                )
-            else:
-                strategy_results = pd.read_csv(QUERY_STRATEGY_RESULTS_FILE).sort_values(
-                    "warm_median_ms"
-                )
-                st.dataframe(strategy_results, width="stretch", hide_index=True)
-                fastest = strategy_results.iloc[0]
-                st.success(
-                    f"Fastest measured strategy: {fastest['strategy']} at "
-                    f"{fastest['warm_median_ms']:.4f} ms. Range lookup applies only to contiguous IDs."
-                )
-
-
-with workspace_tabs[4]:
-    st.subheader("Memory and CPU")
-    st.markdown(
-        '<p class="section-intro">Each engine runs in a separate process so one engine does not inherit the other engine\'s memory.</p>',
-        unsafe_allow_html=True,
-    )
-
-    if resource_report is None:
-        st.info("Select Measure memory and CPU above to create a resource comparison.")
-    else:
-        if resource_report["correctness"]:
-            st.success("Resource-test correctness passed.")
-        else:
-            st.error("Resource-test correctness failed; do not compare these numbers.")
-
-        networkx_resource = resource_report["networkx"]
-        ladybug_resource = resource_report["ladybug"]
-
-        resource_columns = st.columns(4)
-        resource_columns[0].metric(
-            "NetworkX memory added",
-            f"{networkx_resource['additional_peak_memory_mb']:.2f} MB",
-        )
-        resource_columns[1].metric(
-            "LadybugDB memory added",
-            f"{ladybug_resource['additional_peak_memory_mb']:.2f} MB",
-        )
-        resource_columns[2].metric(
-            "NetworkX CPU",
-            f"{networkx_resource['cpu_utilization_percent']:.1f}%",
-        )
-        resource_columns[3].metric(
-            "LadybugDB CPU",
-            f"{ladybug_resource['cpu_utilization_percent']:.1f}%",
-        )
-
-        chart_column, explanation_column = st.columns([1.35, 1])
-        with chart_column:
-            create_resource_chart(resource_report)
-        with explanation_column:
-            st.info(
-                "Memory added estimates the extra memory used while building the graph. Total process peak also includes Python and imported libraries."
-            )
-            st.caption(
-                "CPU may exceed 100% when native code uses more than one processor core. Small graphs are often dominated by startup overhead."
-            )
-
-
-with workspace_tabs[5]:
-    preview_column, explanation_column = st.columns([1.45, 1])
-
-    with preview_column:
-        st.subheader(dataset_name)
-        st.dataframe(preview_dataframe.head(15), width="stretch", hide_index=True)
-        st.caption(f"Showing 15 of {len(preview_dataframe):,} original rows.")
-
-    with explanation_column:
-        st.subheader("Data preparation")
-        st.write(f"Starting-node column: `{source_column}`")
-        st.write(f"Destination-node column: `{target_column}`")
-        st.write(f"Rows missing an endpoint: **{normalized_graph.missing_rows:,}**")
-        st.write(
-            f"Duplicate connections removed: **{normalized_graph.duplicate_edges:,}**"
-        )
-        st.write(f"Self-connections retained: **{normalized_graph.self_loops:,}**")
-        st.info(
-            "GraphBench converts labels such as names or URLs into internal numeric IDs so both engines receive exactly the same graph."
-        )
-
-
-with workspace_tabs[6]:
-    about_tab, methodology_tab, roadmap_tab = st.tabs(
-        ["Product", "Methodology", "Roadmap"]
-    )
-
-    with about_tab:
-        st.subheader("What GraphBench is")
-        st.write(
-            "GraphBench is an interactive graph-engine evaluation product. It helps developers understand whether an in-memory analysis library or an embedded graph database better fits a particular workload."
-        )
-        st.write(
-            "The project demonstrates correctness validation, reproducible performance engineering, isolated resource measurement, user-data ingestion, query-plan investigation, and evidence-driven optimization."
-        )
-        st.caption(
-            "Python · NetworkX · LadybugDB · Cypher · PyArrow · Pandas · Streamlit · Altair"
-        )
-
-    with methodology_tab:
-        st.markdown("""
-#### How to read the results
-
-- **Build median:** typical time to create a fresh query-ready backend.
-- **Query median:** typical time for one complete neighbor-query batch.
-- **P95:** a slower tail result; 95% of measured runs finished at or below it.
-- **Throughput:** estimated batches per second from average latency, not a concurrent load test.
-- **Correctness:** node counts, edge counts, and returned neighbors must match before winner claims appear.
-
-#### LadybugDB optimizations applied
-
-- Sorted PyArrow bulk loading instead of Pandas ingestion.
-- `ANALYZE` after loading.
-- Parameterized Cypher for plan reuse.
-- Fresh backend for each build repetition, excluding previous-graph deletion.
-- Python-side result sorting instead of database `ORDER BY`.
-- Range predicates for contiguous batches and `IN` for arbitrary batches.
-
-#### Known limitation
-
-Profiling LadybugDB 0.20.3 showed node and relationship scans plus a target-node hash join for arbitrary batched neighbor lookup. This explains why NetworkX remains faster for direct adjacency access even when LadybugDB wins larger optimized ingestion workloads.
-""")
-
-        available_report = report or resource_report
-        st.divider()
-        st.markdown("#### Reproducibility record")
-
-        if available_report is None:
-            st.info(
-                "Run a benchmark or resource test to record this machine and package versions."
-            )
-        elif "environment" not in available_report:
-            st.info("Run this test again to create an environment record.")
-        else:
-            environment = available_report["environment"]
-            packages = environment["packages"]
-            system = environment["system"]
-
-            environment_columns = st.columns(4)
-            environment_columns[0].metric("Python", environment["python"]["version"])
-            environment_columns[1].metric("NetworkX", packages["networkx"])
-            environment_columns[2].metric("LadybugDB", packages["ladybug"])
-            environment_columns[3].metric("Machine", system["machine"])
-
-            st.caption(
-                f"Recorded {environment['timestamp_utc']} · Dataset SHA-256 "
-                f"{available_report['dataset']['sha256'][:16]}..."
-            )
-
-            with st.expander("Complete environment details"):
-                st.json(environment)
-
-    with roadmap_tab:
-        st.subheader("Engine roadmap")
-        engine_columns = st.columns(2)
-        cards = [
-            ("NetworkX", "available", "Available", "In-memory Python graph analytics."),
+    with actions_tab:
+        st.markdown("### Turn findings into engineering work")
+        action_columns = st.columns(3)
+        action_items = [
             (
-                "LadybugDB",
-                "available",
-                "Available",
-                "Embedded property-graph database.",
+                "1. Protect the critical dependency",
+                f"Review ownership, monitoring, capacity, tests, and fallback behavior for {summary['highest_component']}.",
             ),
-            ("Neo4j", "planned", "In development", "Server-based Cypher database."),
             (
-                "igraph / NetworKit",
-                "planned",
-                "In development",
-                "Compiled graph-analysis engines.",
+                "2. Test the path bottleneck",
+                f"Run a failure or change-impact exercise around {summary['bottleneck_component']} and document affected services.",
+            ),
+            (
+                "3. Control dependency drift",
+                (
+                    "Break or explicitly document the detected cycle. Add a CI check to prevent new circular dependencies."
+                    if cycle
+                    else "Add cycle detection to CI so future circular dependencies are caught before merge."
+                ),
             ),
         ]
-
-        for index, (name, css_class, status, description) in enumerate(cards):
-            with engine_columns[index % 2]:
+        for column, (title, description) in zip(action_columns, action_items):
+            with column:
                 st.markdown(
-                    f"""
-<div class="engine-card">
-    <div class="{css_class}">{status}</div>
-    <h4>{name}</h4>
-    <p>{description}</p>
-</div>
-""",
+                    f'<div class="action-card"><strong>{title}</strong><span>{description}</span></div>',
                     unsafe_allow_html=True,
                 )
 
-
-combined_report = {
-    "performance": report,
-    "resources": resource_report,
-}
-
-if report is not None or resource_report is not None:
-    with st.sidebar:
-        st.divider()
-        st.download_button(
-            "Download reproducibility report",
-            json.dumps(combined_report, indent=2),
-            "graphbench_report.json",
-            "application/json",
-            width="stretch",
+        st.info(
+            "Suggested workflow: validate these findings with component owners, create tickets for confirmed risks, and rerun GraphBench after architecture changes."
         )
 
-        with st.expander("Raw report"):
-            st.json(combined_report)
+    with evidence_tab:
+        data_tab, method_tab, download_tab = st.tabs(
+            ["Input data", "Method", "Downloads"]
+        )
+
+        with data_tab:
+            quality_columns = st.columns(5)
+            quality_columns[0].metric("Components", f"{dataset_info['nodes']:,}")
+            quality_columns[1].metric("Dependencies", f"{dataset_info['edges']:,}")
+            quality_columns[2].metric("Missing", f"{dataset_info['missing']:,}")
+            quality_columns[3].metric("Duplicates", f"{dataset_info['duplicates']:,}")
+            quality_columns[4].metric(
+                "Self-dependencies", f"{dataset_info['self_loops']:,}"
+            )
+            st.dataframe(
+                pd.DataFrame(dataset_info["preview"]), width="stretch", hide_index=True
+            )
+
+        with method_tab:
+            st.markdown("""
+- **PageRank** highlights dependencies that receive importance from other important components.
+- **Betweenness centrality** highlights components that sit on many dependency paths.
+- **K-core** finds deeply embedded structural layers after treating the graph as undirected.
+- **Cycle detection** identifies circular dependency chains.
+
+These measurements prioritize human review. They do not predict outages or prove that a component is defective.
+""")
+            with st.expander("Exact recorded methodology"):
+                st.json(report.get("methodology", {}))
+            for warning in report.get("warnings", []):
+                st.warning(warning)
+
+        with download_tab:
+            download_columns = st.columns(2)
+            download_columns[0].download_button(
+                "Download full report (JSON)",
+                json.dumps(report, indent=2),
+                "dependency_intelligence_report.json",
+                "application/json",
+                width="stretch",
+            )
+            if candidates:
+                csv_frame = pd.DataFrame(normalized_candidates).drop(
+                    columns=["Reasons", "Cautions"]
+                )
+                download_columns[1].download_button(
+                    "Download review list (CSV)",
+                    csv_frame.to_csv(index=False),
+                    "dependency_review_candidates.csv",
+                    "text/csv",
+                    width="stretch",
+                )
+
+
+if st.session_state.get("show_setup"):
+    setup_dialog()
